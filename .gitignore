@@ -1,0 +1,19 @@
+# Build outputs (installers/APKs go to GitHub Releases instead)
+dist/
+
+# Windows
+Fokkus-Windows/bin/
+
+# Android
+Fokkus-Android/.gradle/
+Fokkus-Android/build/
+Fokkus-Android/app/build/
+Fokkus-Android/local.properties
+Fokkus-Android/.idea/
+Fokkus-Android/.kotlin/
+*.iml
+
+# OS / editors
+Thumbs.db
+.DS_Store
+.vscode/

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fokkus</string>
+    <string name="accessibility_label">Fokkus app blocker</string>
+    <string name="accessibility_description">Lets Fokkus see which app or website is in front during a focus session, so it can lock everything except the apps and sites you allowed. Nothing is recorded or sent anywhere.</string>
+</resources>
