@@ -18,10 +18,16 @@ data class AppSettings(
     val autoStartBreaks: Boolean = true,
     val autoStartFocus: Boolean = false,
     val strictMode: Boolean = false,
-    val blockApps: Boolean = true,
+    // Apps: two independent functions.
+    //   allowAppsOn -> during focus everything except the allowed apps is locked
+    //   blockAppsOn -> during focus the blocked apps are locked (also wins over the allowed list)
+    val allowAppsOn: Boolean = true,
+    val blockAppsOn: Boolean = false,
     val allowedApps: Set<String> = emptySet(),
-    val webFilter: Boolean = true,
-    val webAllowMode: Boolean = true,
+    val blockedApps: Set<String> = Presets.defaultBlockedApps,
+    // Websites: the same two functions.
+    val allowSitesOn: Boolean = true,
+    val blockSitesOn: Boolean = false,
     val allowedSites: List<String> = Presets.defaultAllowedSites,
     val blockedSites: List<String> = Presets.defaultBlockedSites,
     val display: TimerDisplay = TimerDisplay.BOTH,
@@ -38,26 +44,13 @@ data class AppSettings(
     val activeSubjectId: String? = null,
     val autoNextSubject: Boolean = true,
     val planSince: String? = null, // yyyy-MM-dd: plan targets count from this day on
-    // sites that stay in a list but are switched off
-    val disabledAllowedSites: Set<String> = emptySet(),
-    val disabledBlockedSites: Set<String> = emptySet(),
     val settingsVersion: Int = CURRENT_VERSION,
 ) {
-    val currentSites: List<String> get() = if (webAllowMode) allowedSites else blockedSites
-    val currentDisabled: Set<String> get() = if (webAllowMode) disabledAllowedSites else disabledBlockedSites
-    val activeAllowedSites: List<String> get() = allowedSites.filter { it !in disabledAllowedSites }
-    val activeBlockedSites: List<String> get() = blockedSites.filter { it !in disabledBlockedSites }
-
-    /** Copy with the current list / its switched-off entries replaced. */
-    fun withCurrent(list: List<String>, off: Set<String>): AppSettings {
-        val clean = list.distinct().sorted()
-        val o = off.filter { it in clean }.toSet()
-        return if (webAllowMode) copy(allowedSites = clean, disabledAllowedSites = o) else copy(blockedSites = clean, disabledBlockedSites = o)
-    }
+    val anySiteFilter: Boolean get() = allowSitesOn || blockSitesOn
 
     companion object {
         /** Bumped when defaults change, so saved settings get the new defaults once. */
-        const val CURRENT_VERSION = 2
+        const val CURRENT_VERSION = 3
     }
     val planStart: LocalDate get() = planSince?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.MAX
 }
@@ -85,10 +78,9 @@ object SettingsStore {
         val s = try { fromJson(JSONObject(json)) } catch (e: Exception) { return AppSettings() }
         if (s.settingsVersion >= AppSettings.CURRENT_VERSION) return s
         // v2: GitHub & coding sites (GitHub sign-in, VS Code / github.dev, registries) are allowed by default.
-        val upgraded = s.copy(
-            allowedSites = (s.allowedSites + Presets.codingSites).distinct().sorted(),
-            settingsVersion = AppSettings.CURRENT_VERSION,
-        )
+        // v3: separate on/off functions - the old keys are converted in fromJson().
+        var upgraded = s.copy(settingsVersion = AppSettings.CURRENT_VERSION)
+        if (s.settingsVersion < 2) upgraded = upgraded.copy(allowedSites = (s.allowedSites + Presets.codingSites).distinct().sorted())
         prefs.edit().putString("json", toJson(upgraded).toString()).apply()
         return upgraded
     }
@@ -96,8 +88,10 @@ object SettingsStore {
     private fun toJson(s: AppSettings) = JSONObject().apply {
         put("focusMin", s.focusMin); put("shortBreakMin", s.shortBreakMin); put("longBreakMin", s.longBreakMin)
         put("sessionsBeforeLong", s.sessionsBeforeLong); put("autoStartBreaks", s.autoStartBreaks)
-        put("autoStartFocus", s.autoStartFocus); put("strictMode", s.strictMode); put("blockApps", s.blockApps)
-        put("allowedApps", JSONArray(s.allowedApps.toList())); put("webFilter", s.webFilter); put("webAllowMode", s.webAllowMode)
+        put("autoStartFocus", s.autoStartFocus); put("strictMode", s.strictMode)
+        put("allowAppsOn", s.allowAppsOn); put("blockAppsOn", s.blockAppsOn)
+        put("allowedApps", JSONArray(s.allowedApps.toList())); put("blockedApps", JSONArray(s.blockedApps.toList()))
+        put("allowSitesOn", s.allowSitesOn); put("blockSitesOn", s.blockSitesOn)
         put("allowedSites", JSONArray(s.allowedSites)); put("blockedSites", JSONArray(s.blockedSites))
         put("display", s.display.name); put("tipsEnabled", s.tipsEnabled); put("tipIntervalMin", s.tipIntervalMin)
         put("breakSuggestions", s.breakSuggestions); put("disabledTipCategories", JSONArray(s.disabledTipCategories.toList()))
@@ -107,8 +101,6 @@ object SettingsStore {
                 put(JSONObject().put("id", sub.id).put("name", sub.name).put("color", sub.colorIndex).put("targets", JSONArray(sub.targets)))
             }
         })
-        put("disabledAllowedSites", JSONArray(s.disabledAllowedSites.toList()))
-        put("disabledBlockedSites", JSONArray(s.disabledBlockedSites.toList()))
         put("settingsVersion", s.settingsVersion)
         put("activeSubjectId", s.activeSubjectId ?: JSONObject.NULL)
         put("autoNextSubject", s.autoNextSubject)
@@ -132,6 +124,11 @@ object SettingsStore {
 
     private fun fromJson(o: JSONObject): AppSettings {
         val d = AppSettings()
+        // Saved by v1.0/1.1: one filter switch + mode, and per-site switches (switched-off sites are dropped).
+        val webFilter = o.optBoolean("webFilter", true)
+        val webAllowMode = o.optBoolean("webAllowMode", true)
+        val offAllowed = o.strings("disabledAllowedSites", emptyList()).toSet()
+        val offBlocked = o.strings("disabledBlockedSites", emptyList()).toSet()
         return AppSettings(
             focusMin = o.optInt("focusMin", d.focusMin).coerceIn(1, 240),
             shortBreakMin = o.optInt("shortBreakMin", d.shortBreakMin).coerceIn(1, 60),
@@ -140,12 +137,14 @@ object SettingsStore {
             autoStartBreaks = o.optBoolean("autoStartBreaks", d.autoStartBreaks),
             autoStartFocus = o.optBoolean("autoStartFocus", d.autoStartFocus),
             strictMode = o.optBoolean("strictMode", d.strictMode),
-            blockApps = o.optBoolean("blockApps", d.blockApps),
+            allowAppsOn = o.optBoolean("allowAppsOn", o.optBoolean("blockApps", d.allowAppsOn)),
+            blockAppsOn = o.optBoolean("blockAppsOn", d.blockAppsOn),
             allowedApps = o.strings("allowedApps", emptyList()).toSet(),
-            webFilter = o.optBoolean("webFilter", d.webFilter),
-            webAllowMode = o.optBoolean("webAllowMode", d.webAllowMode),
-            allowedSites = o.strings("allowedSites", d.allowedSites),
-            blockedSites = o.strings("blockedSites", d.blockedSites),
+            blockedApps = o.strings("blockedApps", d.blockedApps.toList()).toSet(),
+            allowSitesOn = o.optBoolean("allowSitesOn", webFilter && webAllowMode),
+            blockSitesOn = o.optBoolean("blockSitesOn", webFilter && !webAllowMode),
+            allowedSites = o.strings("allowedSites", d.allowedSites).filter { it !in offAllowed },
+            blockedSites = o.strings("blockedSites", d.blockedSites).filter { it !in offBlocked },
             display = runCatching { TimerDisplay.valueOf(o.optString("display")) }.getOrDefault(d.display),
             tipsEnabled = o.optBoolean("tipsEnabled", d.tipsEnabled),
             tipIntervalMin = o.optInt("tipIntervalMin", d.tipIntervalMin).coerceIn(5, 120),
@@ -159,8 +158,6 @@ object SettingsStore {
             activeSubjectId = if (o.isNull("activeSubjectId")) null else o.optString("activeSubjectId").ifEmpty { null },
             autoNextSubject = o.optBoolean("autoNextSubject", true),
             planSince = if (o.isNull("planSince")) null else o.optString("planSince").ifEmpty { null },
-            disabledAllowedSites = o.strings("disabledAllowedSites", emptyList()).toSet(),
-            disabledBlockedSites = o.strings("disabledBlockedSites", emptyList()).toSet(),
             settingsVersion = o.optInt("settingsVersion", 1),
         )
     }

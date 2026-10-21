@@ -24,6 +24,7 @@ namespace Fokkus
         public readonly PomodoroEngine Engine;
         public readonly ProxyServer Proxy;
         public readonly AppBlocker AppBlocker;
+        public readonly AppGuard AppGuard;
         public readonly Dictionary<string, BlockEntry> BlockLog = new Dictionary<string, BlockEntry>();
 
         readonly Control invoker;
@@ -66,6 +67,8 @@ namespace Fokkus
 
             AppBlocker = new AppBlocker(invoker);
             AppBlocker.AppClosed += OnAppClosed;
+            AppGuard = new AppGuard();
+            AppGuard.AppMinimized += OnAppMinimized;
 
             toast = new TipToast();
             mini = new MiniTimerForm(this);
@@ -131,13 +134,34 @@ namespace Fokkus
             Notify("\U0001F512", "Strict mode is on", "No escape until this focus session ends — " + Theme.FormatTime(Engine.Remaining) + " to go. You've got this.", Theme.Focus, 6, null, null);
         }
 
-        // Website filter / app blocking on or off (also mid-session; turning off is refused in strict mode).
-        public void SetBlocking(bool websites, bool on)
+        // Turns one of the four functions on or off (also mid-session). Turning one off is refused in strict mode.
+        public bool SetFilter(Filter f, bool on)
         {
-            if (!on && StrictLocked) { StrictNotice(); return; }
-            if (websites) Settings.BlockWebsites = on;
-            else Settings.BlockApps = on;
+            if (Settings.IsOn(f) == on) return true;
+            if (!on && StrictLocked) { StrictNotice(); return false; }
+            Settings.SetOn(f, on);
             SettingsChanged();
+            return true;
+        }
+
+        // Strict mode only lets you make the rules stricter until the focus session ends.
+        public bool RefuseLoosening(bool loosens)
+        {
+            if (!loosens || !StrictLocked) return false;
+            Notify("\U0001F512", "Strict mode is on", "You can only make your lists stricter until this focus session ends — " +
+                   Theme.FormatTime(Engine.Remaining) + " to go.", Theme.Focus, 5, null, null);
+            return true;
+        }
+
+        public static string FilterName(Filter f)
+        {
+            switch (f)
+            {
+                case Filter.AllowSites: return "Allowed websites";
+                case Filter.BlockSites: return "Blocked websites";
+                case Filter.AllowApps: return "Allowed apps";
+                default: return "Blocked apps";
+            }
         }
 
         public void SettingsChanged()
@@ -182,7 +206,7 @@ namespace Fokkus
         {
             SystemProxy.RecoverAll();
             UpdateBlocking();
-            Notify("✅", "Internet settings restored", Engine.IsLockedIn && Settings.BlockWebsites
+            Notify("✅", "Internet settings restored", Engine.IsLockedIn && HostRules.From(Settings).Active
                 ? "Your focus session is still running, so filtering was switched back on."
                 : "Your proxy settings are back to how they were before Fokkus.", Theme.ShortBreak, 6, null, null);
         }
@@ -197,6 +221,7 @@ namespace Fokkus
             clock.Stop();
             if (!Headless) try { SystemProxy.Disengage(); } catch (Exception ex) { Log.Error(ex); }
             AppBlocker.Update(false, new string[0]);
+            AppGuard.Update(false, new string[0]);
             Proxy.Stop();
             SystemEvents.SessionEnding -= OnSessionEnding;
             tray.Visible = false;
@@ -338,11 +363,13 @@ namespace Fokkus
             if (Headless) return;
             try
             {
-                if (locked && Settings.BlockWebsites) SystemProxy.Engage(Proxy.Port, rules.BuildBypassList());
+                if (locked && rules.Active) SystemProxy.Engage(Proxy.Port, rules.BuildBypassList());
                 else SystemProxy.Disengage();
             }
             catch (Exception ex) { Log.Error(ex); }
-            AppBlocker.Update(locked && Settings.BlockApps, Settings.ActiveApps);
+            // Blocked apps are closed; with "Allowed apps" on, every other app is minimized. Blocked wins.
+            AppBlocker.Update(locked && Settings.BlockAppsOn, Settings.BlockedApps);
+            AppGuard.Update(locked && Settings.AllowAppsOn, Settings.AllowedApps.Where(a => !(Settings.BlockAppsOn && AppSettings.Has(Settings.BlockedApps, a))));
         }
 
         void OnSiteBlocked(string host)
@@ -364,7 +391,9 @@ namespace Fokkus
             be.Last = DateTime.Now;
             blockLogDirty = true;
 
-            bool distraction = !Settings.AllowListMode || Presets.IsKnownDistraction(host);
+            // Pages pull in lots of background hosts; only speak up for real distractions.
+            var rules = Proxy.Rules;
+            bool distraction = (rules.BlockOn && rules.MatchesBlocked(host)) || Presets.IsKnownDistraction(host);
             if (!distraction) return;
             mini.Flash("✕ " + domain);
             if (CanNotice("site:" + domain, 90))
@@ -375,7 +404,23 @@ namespace Fokkus
         {
             mini.Flash("✕ " + name + " closed");
             if (CanNotice("app:" + name.ToLowerInvariant(), 120))
-                Notify("\U0001F6AB", name + " was closed", "It's on your focus block list. You can open it again during the break.", Theme.Focus, 6, null, null);
+                Notify("\U0001F6AB", name + " was closed", "It's on your blocked apps list. You can open it again during the break.", Theme.Focus, 6, null, null);
+        }
+
+        void OnAppMinimized(string name)
+        {
+            mini.Flash("– " + name + " minimized");
+            if (CanNotice("min:" + name.ToLowerInvariant(), 120))
+                Notify("\U0001F4A4", name + " was minimized", "It isn't on your allowed apps list, so it waits until the break. Nothing was closed.",
+                    Theme.Focus, 8, "Allow " + name, () => AllowApp(name));
+        }
+
+        // Puts an app on the allowed list (from the "minimized" notice).
+        public void AllowApp(string name)
+        {
+            if (RefuseLoosening(true)) return;
+            if (!AppSettings.Has(Settings.AllowedApps, name)) Settings.AllowedApps.Add(name);
+            SettingsChanged();
         }
 
         bool CanNotice(string key, int seconds)
@@ -529,8 +574,6 @@ namespace Fokkus
             }
             Settings.ActiveSubjectId = Settings.Subjects[1].Id;
             Settings.PlanSince = DateTime.Today.AddDays(-56).ToString("yyyy-MM-dd");
-            if (!AppSettings.Has(Settings.DisabledAllowedSites, "arxiv.org")) Settings.DisabledAllowedSites.Add("arxiv.org");
-            if (!AppSettings.Has(Settings.DisabledApps, "Battle.net")) Settings.DisabledApps.Add("Battle.net");
             var rnd = new Random(7);
             for (int back = 56; back >= 0; back--)
             {
@@ -586,9 +629,12 @@ namespace Fokkus
             var open = new ToolStripMenuItem("Open Fokkus", null, (s, e) => ShowMain());
             open.Font = Theme.FB(9.5f);
             var quit = new ToolStripMenuItem("Quit", null, (s, e) => Exit());
-            var webItem = new ToolStripMenuItem("Website filter", null, (s, e) => SetBlocking(true, !Settings.BlockWebsites));
-            var appsItem = new ToolStripMenuItem("App blocking", null, (s, e) => SetBlocking(false, !Settings.BlockApps));
-            m.Items.AddRange(new ToolStripItem[] { status, new ToolStripSeparator(), toggle, skip, stop, new ToolStripSeparator(), webItem, appsItem, new ToolStripSeparator(), miniItem, tip, open, new ToolStripSeparator(), quit });
+            var filters = new[] { Filter.AllowSites, Filter.BlockSites, Filter.AllowApps, Filter.BlockApps };
+            var filterItems = filters.Select(f => new ToolStripMenuItem(FilterName(f), null, (s, e) => SetFilter(f, !Settings.IsOn(f)))).ToArray();
+            var during = new ToolStripMenuItem("During focus") { Enabled = false };
+            m.Items.AddRange(new ToolStripItem[] { status, new ToolStripSeparator(), toggle, skip, stop, new ToolStripSeparator(), during });
+            m.Items.AddRange(filterItems);
+            m.Items.AddRange(new ToolStripItem[] { new ToolStripSeparator(), miniItem, tip, open, new ToolStripSeparator(), quit });
             m.Opening += (s, e) =>
             {
                 var st = Engine.State;
@@ -598,8 +644,7 @@ namespace Fokkus
                 skip.Enabled = st != RunState.Idle && !StrictLocked;
                 stop.Enabled = st != RunState.Idle && !StrictLocked;
                 miniItem.Checked = mini.Visible;
-                webItem.Checked = Settings.BlockWebsites;
-                appsItem.Checked = Settings.BlockApps;
+                for (int i = 0; i < filters.Length; i++) filterItems[i].Checked = Settings.IsOn(filters[i]);
                 quit.Enabled = !StrictLocked;
                 quit.Text = StrictLocked ? "Quit (locked until focus ends)" : "Quit";
             };

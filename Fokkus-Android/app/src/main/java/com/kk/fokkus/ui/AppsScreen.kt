@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +44,9 @@ import com.kk.fokkus.R
 import com.kk.fokkus.block.AppCatalog
 import com.kk.fokkus.block.AppInfo
 import com.kk.fokkus.block.Blocking
+import com.kk.fokkus.data.AppSettings
+import com.kk.fokkus.data.Preset
+import com.kk.fokkus.data.Presets
 import com.kk.fokkus.data.SettingsStore
 import com.kk.fokkus.timer.TimerEngine
 import kotlinx.coroutines.Dispatchers
@@ -56,27 +61,41 @@ fun AppsScreen() {
     var apps by remember { mutableStateOf<List<AppInfo>?>(null) }
     LaunchedEffect(Unit) { apps = withContext(Dispatchers.IO) { AppCatalog.launchableApps(ctx) } }
     var query by rememberSaveable { mutableStateOf("") }
-    // Sort once (allowed first) so rows don't jump around while ticking boxes.
-    val initiallyAllowed = remember(apps) { SettingsStore.current.allowedApps }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val allowedTab = tab == 0
+    val ticked = if (allowedTab) s.allowedApps else s.blockedApps
+    val installed = remember(apps) { apps?.map { it.pkg }?.toSet() }
+    // Sort once per tab (ticked first) so rows don't jump around while ticking boxes.
+    val initiallyTicked = remember(apps, tab) { if (tab == 0) SettingsStore.current.allowedApps else SettingsStore.current.blockedApps }
+
+    fun setTicked(set: Set<String>) = SettingsStore.update { if (allowedTab) it.copy(allowedApps = set) else it.copy(blockedApps = set) }
+    fun count(set: Set<String>) = if (installed == null) set.size else set.count { it in installed }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        item { ScreenTitle("Apps", "During focus only the apps you tick work. Everything else is locked.") }
+        item { ScreenTitle("Apps", "Two separate functions — switch on one, both or none.") }
         item { StrictBanner(strict) }
         item {
-            Card(Modifier.padding(top = 8.dp)) {
-                Column {
-                    SwitchRow(
-                        "Lock apps during focus", s.blockApps, { v -> SettingsStore.update { it.copy(blockApps = v) } },
-                        description = "Opening anything else shows the lock screen until the focus session ends.",
-                        enabled = !strict,
-                    )
-                    Text(
-                        "Always available: phone & emergency calls, home screen, keyboard, alarms and Android settings." +
-                            if (s.webFilter) " Browsers stay open but only show allowed websites (see Websites)." else "",
-                        color = Palette.Muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-            }
+            FilterCard(
+                "Allowed apps", "During focus everything except the apps on your allowed list is locked.", s.allowAppsOn,
+                { v -> SettingsStore.update { it.copy(allowAppsOn = v) } },
+                "Blocked apps", "Apps on your blocked list are locked during focus — this wins over allowed.", s.blockAppsOn,
+                { v -> SettingsStore.update { it.copy(blockAppsOn = v) } },
+                strict, appStatus(s, count(s.allowedApps), count(s.blockedApps)),
+                "Always available: phone & emergency calls, home screen, keyboard, alarms and Android settings." +
+                    if (s.allowAppsOn && s.anySiteFilter) " Browsers stay open but filter websites (see Websites)." else "",
+            )
+        }
+        item {
+            ListTabs(
+                tab, count(s.allowedApps), count(s.blockedApps), if (allowedTab) s.allowAppsOn else s.blockAppsOn,
+                if (allowedTab) "In use — during focus only these apps work." else "In use — these apps are locked during focus.",
+                if (allowedTab) "Allowed apps" else "Blocked apps",
+            ) { tab = it }
+        }
+        // Quick add for the blocked list: only the apps of a category that are installed on this phone.
+        if (!allowedTab && installed != null) item {
+            val presets = Presets.blockApps.map { p -> Preset(p.name, p.items.filter { it in installed }) }.filter { it.items.isNotEmpty() }
+            QuickAddChips(presets, { it in s.blockedApps }, true) { p -> setTicked(s.blockedApps + p.items) }
         }
         item {
             OutlinedTextField(
@@ -101,28 +120,35 @@ fun AppsScreen() {
         } else {
             val q = query.trim().lowercase()
             val shown = list.filter { q.isEmpty() || it.label.lowercase().contains(q) || it.pkg.contains(q) }
-                .sortedWith(compareByDescending<AppInfo> { it.pkg in initiallyAllowed }.thenBy { it.label.lowercase() })
-            item { SectionTitle("${s.allowedApps.count { a -> list.any { it.pkg == a } }} allowed · ${list.size} apps") }
+                .sortedWith(compareByDescending<AppInfo> { it.pkg in initiallyTicked }.thenBy { it.label.lowercase() })
+            item { SectionTitle("${count(ticked)} ${if (allowedTab) "allowed" else "blocked"} · ${list.size} apps") }
             items(shown, key = { it.pkg }) { app ->
-                val checked = app.pkg in s.allowedApps
-                val browser = s.webFilter && Blocking.isFilterableBrowser(app.pkg)
+                val checked = app.pkg in ticked
+                // Browsers are usable with the allowed list when websites are filtered.
+                val browser = allowedTab && s.anySiteFilter && Blocking.isFilterableBrowser(app.pkg)
                 AppRow(
                     app = app,
                     checked = checked || browser,
                     note = if (browser) "browser · websites filtered" else null,
+                    accent = if (allowedTab) Palette.ShortBreak else Palette.Warn,
                     // Strict mode: you may lock more apps, but not unlock new ones.
-                    enabled = !browser && (!strict || checked),
-                ) { on ->
-                    SettingsStore.update { it.copy(allowedApps = if (on) it.allowedApps + app.pkg else it.allowedApps - app.pkg) }
-                }
+                    enabled = !browser && (!strict || (if (allowedTab) checked else !checked)),
+                ) { on -> setTicked(if (on) ticked + app.pkg else ticked - app.pkg) }
             }
             item { Spacer(Modifier.padding(bottom = 24.dp)) }
         }
     }
 }
 
+private fun appStatus(s: AppSettings, allowed: Int, blocked: Int): String = when {
+    s.allowAppsOn && s.blockAppsOn -> "During focus: only your $allowed allowed apps work, and your $blocked blocked apps never do."
+    s.allowAppsOn -> "During focus: only your $allowed allowed apps work. Everything else is locked."
+    s.blockAppsOn -> "During focus: everything works except your $blocked blocked apps."
+    else -> "Both off — every app works during focus."
+}
+
 @Composable
-private fun AppRow(app: AppInfo, checked: Boolean, note: String?, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+private fun AppRow(app: AppInfo, checked: Boolean, note: String?, accent: Color, enabled: Boolean, onToggle: (Boolean) -> Unit) {
     val ctx = LocalContext.current
     val icon by produceState<ImageBitmap?>(null, app.pkg) { value = withContext(Dispatchers.IO) { AppCatalog.icon(ctx, app.pkg) } }
     Row(
@@ -141,7 +167,7 @@ private fun AppRow(app: AppInfo, checked: Boolean, note: String?, enabled: Boole
         }
         Checkbox(
             checked = checked, onCheckedChange = { onToggle(it) }, enabled = enabled,
-            colors = CheckboxDefaults.colors(checkedColor = Palette.ShortBreak, uncheckedColor = Palette.Border, checkmarkColor = Palette.Bg),
+            colors = CheckboxDefaults.colors(checkedColor = accent, uncheckedColor = Palette.Border, checkmarkColor = Palette.Bg),
         )
     }
 }

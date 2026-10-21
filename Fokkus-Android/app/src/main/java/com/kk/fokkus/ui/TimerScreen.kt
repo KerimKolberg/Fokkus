@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kk.fokkus.Perms
 import com.kk.fokkus.R
+import com.kk.fokkus.data.AppSettings
 import com.kk.fokkus.data.Motivation
 import com.kk.fokkus.data.PlanRow
 import com.kk.fokkus.data.Planner
@@ -178,12 +179,12 @@ fun TimerScreen(resumeTick: Int, requestNotifications: () -> Unit, onOpenPlan: (
             st.lockedIn -> buildString {
                 append("🔒 Locked in")
                 val parts = mutableListOf<String>()
-                if (s.blockApps) parts += "${s.allowedApps.size} apps allowed"
-                if (s.webFilter) parts += if (s.webAllowMode) "only allowed websites" else "distracting websites blocked"
+                if (s.allowAppsOn) parts += "allowed apps only" else if (s.blockAppsOn) parts += "blocked apps locked"
+                if (s.allowSitesOn) parts += "allowed sites only" else if (s.blockSitesOn) parts += "blocked sites stopped"
                 if (parts.isNotEmpty()) append(" — ").append(parts.joinToString(", "))
                 if (strict) append(" · strict")
             }
-            st.run == RunState.IDLE -> "Press Lock in to start. During focus only your allowed apps and websites work."
+            st.run == RunState.IDLE -> "Press Lock in to start. During focus Fokkus uses the switches below."
             st.phase == Phase.FOCUS -> "Next up: focus. Locking starts when you press start."
             else -> "Break time — everything is unlocked. Move, drink, breathe."
         }
@@ -192,16 +193,15 @@ fun TimerScreen(resumeTick: Int, requestNotifications: () -> Unit, onOpenPlan: (
             textAlign = TextAlign.Center, fontWeight = if (st.lockedIn) FontWeight.SemiBold else FontWeight.Normal,
         )
 
-        // Quick switches: decide per session what gets locked (e.g. websites off for a programming session).
+        // Quick switches for the four functions: decide per session what gets locked
+        // (e.g. only "Blocked websites" for a programming session).
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            QuickToggle("Website filter", R.drawable.ic_globe, s.webFilter, enabled = !(strict && s.webFilter), modifier = Modifier.weight(1f)) { v ->
-                SettingsStore.update { it.copy(webFilter = v) }
-                TimerEngine.settingsChanged()
-            }
-            QuickToggle("App lock", R.drawable.ic_apps, s.blockApps, enabled = !(strict && s.blockApps), modifier = Modifier.weight(1f)) { v ->
-                SettingsStore.update { it.copy(blockApps = v) }
-                TimerEngine.settingsChanged()
-            }
+            FilterQuick("Allowed", "websites", R.drawable.ic_globe, s.allowSitesOn, strict, Modifier.weight(1f)) { a, v -> a.copy(allowSitesOn = v) }
+            FilterQuick("Blocked", "websites", R.drawable.ic_shield, s.blockSitesOn, strict, Modifier.weight(1f)) { a, v -> a.copy(blockSitesOn = v) }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilterQuick("Allowed", "apps", R.drawable.ic_apps, s.allowAppsOn, strict, Modifier.weight(1f)) { a, v -> a.copy(allowAppsOn = v) }
+            FilterQuick("Blocked", "apps", R.drawable.ic_close, s.blockAppsOn, strict, Modifier.weight(1f)) { a, v -> a.copy(blockAppsOn = v) }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -311,6 +311,17 @@ fun phaseLabel(p: Phase) = when (p) {
     Phase.LONG_BREAK -> "Long break"
 }
 
+/** One of the four function switches. Strict mode: a function can be switched on, but not off. */
+@Composable
+private fun FilterQuick(
+    label: String, sub: String, icon: Int, on: Boolean, strict: Boolean, modifier: Modifier, set: (AppSettings, Boolean) -> AppSettings,
+) {
+    QuickToggle(label, icon, on, enabled = !(strict && on), modifier = modifier, sub = sub) { v ->
+        SettingsStore.update { set(it, v) }
+        TimerEngine.settingsChanged()
+    }
+}
+
 @Composable
 fun SetupCard(resumeTick: Int, requestNotifications: () -> Unit) {
     val ctx = LocalContext.current
@@ -320,7 +331,7 @@ fun SetupCard(resumeTick: Int, requestNotifications: () -> Unit) {
     val overlay = remember(resumeTick) { Perms.overlay(ctx) }
     val battery = remember(resumeTick) { Perms.battery(ctx) }
     val needOverlay = s.display != TimerDisplay.NOTIFICATION
-    val needAcc = s.blockApps || s.webFilter
+    val needAcc = s.allowAppsOn || s.blockAppsOn || s.anySiteFilter
     if (notif && (acc || !needAcc) && (overlay || !needOverlay)) {
         if (!battery) {
             TextButton(onClick = { Perms.openBattery(ctx) }) {

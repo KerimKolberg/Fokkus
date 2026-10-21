@@ -278,6 +278,8 @@ namespace Fokkus
 
         public void SetSilently(int index) { selected = index; Invalidate(); }
 
+        public void SetLabel(int index, string text) { if (options[index] != text) { options[index] = text; Invalidate(); } }
+
         int Hit(Point p) { int w = Width / options.Length; return Math.Max(0, Math.Min(options.Length - 1, p.X / Math.Max(1, w))); }
 
         protected override void OnMouseMove(MouseEventArgs e) { int h = Hit(e.Location); if (h != hot) { hot = h; Invalidate(); } base.OnMouseMove(e); }
@@ -373,54 +375,6 @@ namespace Fokkus
             if (top < Items.Count) TopIndex = top;
             EndUpdate();
             Invalidate();
-        }
-    }
-
-    // List whose rows each have an on/off switch on the right (click the switch to toggle).
-    class SwitchList : DarkList
-    {
-        public Func<object, bool> IsOn = o => true;
-        public event Action<object> Toggled;
-
-        static int SwitchW { get { return Theme.S(36); } }
-
-        Rectangle SwitchRect(Rectangle row)
-        {
-            int h = Theme.S(20);
-            return new Rectangle(row.Right - SwitchW - Theme.S(14), row.Y + (row.Height - h) / 2, SwitchW, h);
-        }
-
-        protected override void OnDrawItem(DrawItemEventArgs e)
-        {
-            var g = e.Graphics;
-            if (e.Index < 0 || e.Index >= Items.Count)
-            {
-                using (var bb = new SolidBrush(BackColor)) g.FillRectangle(bb, e.Bounds);
-                return;
-            }
-            bool sel = (e.State & DrawItemState.Selected) != 0;
-            using (var b = new SolidBrush(sel ? Theme.Hover : BackColor)) g.FillRectangle(b, e.Bounds);
-            if (sel) using (var a = new SolidBrush(Theme.Focus)) g.FillRectangle(a, e.Bounds.X, e.Bounds.Y + Theme.S(6), Theme.S(3), e.Bounds.Height - Theme.S(12));
-            object item = Items[e.Index];
-            bool on = IsOn(item);
-            var sw = SwitchRect(e.Bounds);
-            Theme.DrawText(g, GetItemText(item), Font, on ? Theme.Text : Theme.Muted,
-                new Rectangle(e.Bounds.X + Theme.S(14), e.Bounds.Y, sw.Left - e.Bounds.X - Theme.S(22), e.Bounds.Height), Theme.Left);
-            var old = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            Theme.FillRound(g, on ? Theme.Focus : Theme.Blend(Theme.Surface, Theme.Bg, 0.3f), sw, sw.Height / 2f);
-            float k = sw.Height - Theme.S(6);
-            using (var kb = new SolidBrush(on ? Color.White : Theme.Muted))
-                g.FillEllipse(kb, on ? sw.Right - k - Theme.S(3) : sw.Left + Theme.S(3), sw.Top + Theme.S(3), k, k);
-            g.SmoothingMode = old;
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            int i = IndexFromPoint(e.Location);
-            if (e.Button == MouseButtons.Left && i >= 0 && i < Items.Count && e.X >= Width - SwitchW - Theme.S(26) && Toggled != null)
-                Toggled(Items[i]);
-            base.OnMouseDown(e);
         }
     }
 

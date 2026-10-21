@@ -7,34 +7,46 @@ using System.Text;
 
 namespace Fokkus
 {
-    // Immutable set of domain rules. A rule "tum.de" matches tum.de and every subdomain (moodle.tum.de, ...).
+    // Immutable website rules. A rule "tum.de" matches tum.de and every subdomain (moodle.tum.de, ...).
+    // Two independent functions: the allowed list (only these work) and the blocked list (these never work, wins).
     class HostRules
     {
-        public readonly bool AllowMode;
-        readonly string[] rules;
+        public readonly bool AllowOn, BlockOn;
+        readonly string[] allow, block;
 
-        public HostRules(bool allowMode, IEnumerable<string> list)
+        public HostRules(bool allowOn, IEnumerable<string> allowList, bool blockOn, IEnumerable<string> blockList)
         {
-            AllowMode = allowMode;
-            rules = (list ?? new string[0]).Select(Normalize).Where(x => x != null).Distinct().ToArray();
+            AllowOn = allowOn;
+            BlockOn = blockOn;
+            allow = Clean(allowList);
+            block = Clean(blockList);
+        }
+
+        static string[] Clean(IEnumerable<string> list)
+        {
+            return (list ?? new string[0]).Select(Normalize).Where(x => x != null).Distinct().ToArray();
         }
 
         public static HostRules From(AppSettings s)
         {
-            return new HostRules(s.AllowListMode, s.ActiveSites(s.AllowListMode));
+            return new HostRules(s.AllowSitesOn, s.AllowedSites, s.BlockSitesOn, s.BlockedSites);
         }
 
-        public int Count { get { return rules.Length; } }
+        // Anything to filter at all?
+        public bool Active { get { return AllowOn || BlockOn; } }
 
         public bool IsAllowed(string host)
         {
             host = CleanHost(host);
             if (host.Length == 0 || IsLocal(host)) return true;
-            bool match = Matches(host);
-            return AllowMode ? match : !match;
+            if (BlockOn && Matches(block, host)) return false;
+            if (AllowOn) return Matches(allow, host);
+            return true;
         }
 
-        public bool Matches(string host)
+        public bool MatchesBlocked(string host) { return Matches(block, CleanHost(host)); }
+
+        static bool Matches(string[] rules, string host)
         {
             foreach (var r in rules)
                 if (host == r || host.EndsWith("." + r, StringComparison.Ordinal)) return true;
@@ -101,9 +113,13 @@ namespace Fokkus
         public string BuildBypassList()
         {
             var sb = new StringBuilder("<local>;localhost;127.*;10.*;192.168.*;" + SystemProxy.Signature);
-            if (AllowMode)
-                foreach (var r in rules)
+            // Allowed sites skip the filter entirely - unless a blocked rule overlaps them (then the filter decides).
+            if (AllowOn)
+                foreach (var r in allow)
+                {
+                    if (BlockOn && block.Any(b => b == r || b.EndsWith("." + r, StringComparison.Ordinal) || r.EndsWith("." + b, StringComparison.Ordinal))) continue;
                     sb.Append(';').Append(r).Append(";*.").Append(r);
+                }
             return sb.ToString();
         }
     }

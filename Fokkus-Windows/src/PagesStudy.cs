@@ -41,8 +41,20 @@ namespace Fokkus
         readonly MotivationCard motto;
         readonly SubjectButton subject;
         readonly TodayPlanView plan;
-        readonly QuickToggle qWeb, qApps;
+        readonly Filter[] quickFilters = { Filter.AllowSites, Filter.BlockSites, Filter.AllowApps, Filter.BlockApps };
+        readonly QuickToggle[] quick = new QuickToggle[4];
         string lastKey;
+
+        static string QuickName(Filter f)
+        {
+            switch (f)
+            {
+                case Filter.AllowSites: return "Allowed sites";
+                case Filter.BlockSites: return "Blocked sites";
+                case Filter.AllowApps: return "Allowed apps";
+                default: return "Blocked apps";
+            }
+        }
 
         public TimerPage(TrayContext ctx, Size size) : base(ctx, size)
         {
@@ -61,12 +73,16 @@ namespace Fokkus
             btnStop = Button("Stop", Glyph.Stop, x + wMain + 2 * gap + wSec, by, wSec, S(48), (s, e) => Ctx.Stop());
             lblState = AddLabel("", Theme.FB(9.5f), Theme.Focus, Pad, by + S(60), leftW, S(42), ContentAlignment.TopCenter);
             lblInfo = AddLabel("", Theme.F(9), Theme.Muted, Pad, by + S(104), leftW, S(22), ContentAlignment.MiddleCenter);
-            // Quick switches: decide per session what gets blocked (e.g. websites off for a programming session).
-            int qw = (leftW - S(12)) / 2;
-            qWeb = Place(new QuickToggle("Website filter", Glyph.Globe), Pad, by + S(136), qw, S(40));
-            qWeb.Click += (s, e) => Ctx.SetBlocking(true, !Ctx.Settings.BlockWebsites);
-            qApps = Place(new QuickToggle("App blocking", Glyph.Apps), Pad + qw + S(12), by + S(136), qw, S(40));
-            qApps.Click += (s, e) => Ctx.SetBlocking(false, !Ctx.Settings.BlockApps);
+            // Quick switches for the four functions: decide per session what gets blocked
+            // (e.g. only "Blocked websites" for a programming session).
+            int qw = (leftW - S(10)) / 2;
+            string[] glyphs = { Glyph.Globe, Glyph.Shield, Glyph.Apps, Glyph.Close };
+            for (int i = 0; i < quick.Length; i++)
+            {
+                var f = quickFilters[i];
+                quick[i] = Place(new QuickToggle(QuickName(f), glyphs[i]), Pad + (i % 2) * (qw + S(10)), by + S(134) + (i / 2) * S(44), qw, S(38));
+                quick[i].Click += (s, e) => Ctx.SetFilter(f, !Ctx.Settings.IsOn(f));
+            }
 
             int rx = Pad + leftW + S(24), rw = Width - Pad - rx;
             motto = Place(new MotivationCard(), rx, S(96), rw, S(136));
@@ -140,9 +156,10 @@ namespace Fokkus
             if (eng.IsLockedIn)
             {
                 var parts = new List<string>();
-                if (s.BlockWebsites) parts.Add(s.AllowListMode ? "only allowed websites" : "distracting sites blocked");
-                int apps = s.ActiveApps.Count();
-                if (s.BlockApps && apps > 0) parts.Add(apps + " apps blocked");
+                if (s.AllowSitesOn) parts.Add("allowed sites only");
+                else if (s.BlockSitesOn) parts.Add(s.BlockedSites.Count + " sites blocked");
+                if (s.AllowAppsOn) parts.Add("allowed apps only");
+                else if (s.BlockAppsOn && s.BlockedApps.Count > 0) parts.Add(s.BlockedApps.Count + " apps closed");
                 lblState.Text = "\U0001F512  LOCKED IN" + (Ctx.StrictLocked ? " · STRICT" : "") + (parts.Count > 0 ? "\n" + string.Join(", ", parts) : "");
                 lblState.ForeColor = Theme.Focus;
             }
@@ -164,8 +181,7 @@ namespace Fokkus
             planTitle.Text = "TODAY'S PLAN" + (target > 0 ? "  ·  " + done + " / " + target : "");
             subject.Subject = Planner.Active(s);
             subject.Invalidate();
-            qWeb.SetChecked(s.BlockWebsites);
-            qApps.SetChecked(s.BlockApps);
+            for (int i = 0; i < quick.Length; i++) quick[i].SetChecked(s.IsOn(quickFilters[i]));
             plan.SetRows(Planner.Today(s, Ctx.Sessions), s.ActiveSubjectId);
             lastKey = null;
             OnTick();

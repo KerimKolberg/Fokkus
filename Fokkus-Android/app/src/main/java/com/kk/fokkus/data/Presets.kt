@@ -5,7 +5,7 @@ class Preset(val name: String, val items: List<String>)
 object Presets {
     const val CODING = "GitHub & coding"
 
-    /** Sites you typically NEED while studying ("allow only my list" mode). */
+    /** Sites you typically NEED while studying (the "Allowed websites" list). */
     val allowSites = listOf(
         Preset("TUM", listOf("tum.de", "mytum.de", "tum.live", "lrz.de")),
         Preset("AI", listOf("chatgpt.com", "openai.com", "oaistatic.com", "oaiusercontent.com", "claude.ai", "claude.com",
@@ -27,7 +27,7 @@ object Presets {
         Preset("Essentials", listOf("cloudflare.com", "jsdelivr.net", "unpkg.com", "recaptcha.net", "hcaptcha.com")),
     )
 
-    /** Typical distractions ("block my list" mode). */
+    /** Typical distractions (the "Blocked websites" list). */
     val blockSites = listOf(
         Preset("Social", listOf("instagram.com", "cdninstagram.com", "facebook.com", "fbcdn.net", "messenger.com", "tiktok.com",
             "x.com", "twitter.com", "reddit.com", "redd.it", "snapchat.com", "pinterest.com", "tumblr.com", "threads.net",
@@ -46,18 +46,23 @@ object Presets {
 
     val codingSites: List<String> get() = allowSites.first { it.name == CODING }.items
 
-    /** A category is ON when all of its sites are in the list and switched on. */
-    fun isOn(p: Preset, list: List<String>, off: Set<String>) = p.items.all { it in list && it !in off }
-
-    /** ON -> switch its sites off (except ones another active category needs). OFF -> add / switch them on. */
-    fun toggle(p: Preset, all: List<Preset>, list: List<String>, off: Set<String>): Pair<List<String>, Set<String>> =
-        if (isOn(p, list, off)) {
-            val keep = all.filter { it != p && isOn(it, list, off) }.flatMap { it.items }.toSet()
-            list to (off + p.items.filter { it !in keep })
-        } else {
-            (list + p.items).distinct().sorted() to (off - p.items.toSet())
-        }
     val defaultBlockedSites: List<String> = collect(blockSites, "Social", "Video", "Chat", "Shopping")
+
+    /** Typical distracting apps (package names) for the "Blocked apps" list. */
+    val blockApps = listOf(
+        Preset("Social", listOf("com.instagram.android", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.snapchat.android",
+            "com.twitter.android", "com.reddit.frontpage", "com.facebook.katana", "com.facebook.orca", "com.pinterest", "com.tumblr",
+            "com.instagram.barcelona", "xyz.blueskyweb.app", "com.bereal.ft", "com.ninegag.android.app")),
+        Preset("Video", listOf("com.google.android.youtube", "com.netflix.mediaclient", "tv.twitch.android.app",
+            "com.amazon.avod.thirdpartyclient", "com.disney.disneyplus", "com.crunchyroll.crunchyroid", "de.prosiebensat1digital.seventv")),
+        Preset("Chat", listOf("com.whatsapp", "org.telegram.messenger", "com.discord", "org.thoughtcrime.securesms")),
+        Preset("Games", listOf("com.supercell.clashroyale", "com.supercell.clashofclans", "com.supercell.brawlstars", "com.roblox.client",
+            "com.king.candycrushsaga", "com.chess", "com.mojang.minecraftpe", "com.innersloth.spacemafia")),
+        Preset("Shopping", listOf("com.amazon.mShop.android.shopping", "com.ebay.mobile", "com.einnovation.temu", "com.zzkko",
+            "de.zalando.mobile", "com.alibaba.aliexpresshd", "com.ebay.kleinanzeigen")),
+    )
+
+    val defaultBlockedApps: Set<String> = collect(blockApps, "Social", "Video", "Games").toSet()
 
     private fun collect(presets: List<Preset>, vararg names: String) =
         presets.filter { it.name in names }.flatMap { it.items }.distinct().sorted()

@@ -6,210 +6,235 @@ using System.Windows.Forms;
 
 namespace Fokkus
 {
-    // Category buttons: a preset is ON when all of its entries are in the list and switched on.
-    static class Categories
+    // Websites and Apps share one layout: two independent functions (allowed list / blocked list), each with its
+    // own on/off switch, plus an editor for both lists with quick-add categories.
+    abstract class FilterPage : Page
     {
-        public static bool IsOn(Preset p, List<string> list, List<string> off)
-        {
-            return p.Items.All(i => AppSettings.Has(list, i) && !AppSettings.Has(off, i));
-        }
-
-        // ON -> switch its entries off (except ones another active category needs). OFF -> add/switch them on.
-        public static void Toggle(Preset p, IEnumerable<Preset> all, List<string> list, List<string> off)
-        {
-            if (IsOn(p, list, off))
-            {
-                var keep = new HashSet<string>(all.Where(o => o != p && IsOn(o, list, off)).SelectMany(o => o.Items), StringComparer.OrdinalIgnoreCase);
-                foreach (var i in p.Items)
-                    if (!keep.Contains(i) && !AppSettings.Has(off, i)) off.Add(i);
-            }
-            else
-                foreach (var i in p.Items)
-                {
-                    if (!AppSettings.Has(list, i)) list.Add(i);
-                    off.RemoveAll(x => string.Equals(x, i, StringComparison.OrdinalIgnoreCase));
-                }
-        }
-
-        public static FlatButton Chip(string name, string tooltip, ToolTip tip, int pad)
-        {
-            var b = new FlatButton(name);
-            b.Font = Theme.F(9);
-            b.Size = new Size(TextRenderer.MeasureText("✓  " + name, b.Font).Width + pad, Theme.S(30));
-            b.Margin = new Padding(0, 0, Theme.S(8), Theme.S(8));
-            tip.SetToolTip(b, tooltip);
-            b.Tag = name;
-            return b;
-        }
-
-        public static void Style(FlatButton b, bool on)
-        {
-            string name = (string)b.Tag;
-            b.Text = (on ? "✓  " : "+  ") + name;
-            if (on)
-            {
-                b.BaseColor = Theme.Blend(Theme.Focus, Theme.Bg, 0.55f);
-                b.HoverColor = Theme.Blend(Theme.Focus, Theme.Bg, 0.4f);
-                b.TextColor = Theme.Text;
-            }
-            else b.SetPlain();
-            b.Invalidate();
-        }
-    }
-
-    // ---------------------------------------------------------------- Websites
-    class WebsitesPage : Page
-    {
-        readonly Toggle tglEnabled;
-        readonly Segmented mode;
-        readonly Label modeHint, listTitle;
-        readonly TextInput input;
-        readonly FlatButton btnAdd, btnRemove, btnAllow;
-        readonly SwitchList list;
-        readonly DarkList recent;
-        readonly FlowLayoutPanel presets;
+        protected readonly Filter AllowFilter, BlockFilter;
+        protected readonly Toggle TglAllow, TglBlock;
+        protected readonly Label Status, TabHint, ListTitle;
+        protected readonly Segmented Tabs;
+        protected readonly TextInput Input;
+        protected readonly DarkList List;
+        protected readonly int Full, ColW, RightX, RightW;
+        readonly FlowLayoutPanel chipPanel;
         readonly List<FlatButton> chips = new List<FlatButton>();
-        bool? presetsForAllow;
+        readonly ToolTip tip = new ToolTip();
+        int chipsFor = -1;
 
-        public WebsitesPage(TrayContext ctx, Size size) : base(ctx, size)
+        protected abstract List<string> ListFor(bool allowed);
+        protected abstract Preset[] PresetsFor(bool allowed);
+        protected abstract string Clean(string raw);           // null = not a valid entry
+        protected abstract string StatusText(AppSettings s);
+        protected abstract string InUseHint(bool allowed);
+        protected abstract string Noun { get; }
+
+        protected bool AllowedTab { get { return Tabs.SelectedIndex == 0; } }
+        protected List<string> CurrentList { get { return ListFor(AllowedTab); } }
+
+        protected FilterPage(TrayContext ctx, Size size, Filter allowFilter, Filter blockFilter, string title, string subtitle,
+                             string allowDesc, string blockDesc, string placeholder, int listTop)
+            : base(ctx, size)
         {
-            Header("Websites", "Choose what your browser can open while you focus. Breaks are always unrestricted.");
-            int full = Width - 2 * Pad;
-            tglEnabled = AddToggle("Filter websites during focus", "Works in Chrome, Edge, Brave, Opera and Firefox (with “use system proxy settings”).", Pad, S(98), full, (s, e) =>
-            {
-                if (!tglEnabled.Checked && Ctx.StrictLocked) { tglEnabled.SetSilently(true); return; }
-                Ctx.Settings.BlockWebsites = tglEnabled.Checked;
-                Save();
-            });
+            AllowFilter = allowFilter;
+            BlockFilter = blockFilter;
+            Header(title, subtitle);
+            Full = Width - 2 * Pad;
+            ColW = S(330);
+            RightX = Pad + ColW + S(24);
+            RightW = Full - ColW - S(24);
+            int half = (Full - S(24)) / 2;
 
-            mode = Place(new Segmented("Allow only my list", "Block my list"), Pad, S(158), S(330), S(36));
-            mode.SelectionChanged += (s, e) =>
-            {
-                Ctx.Settings.AllowListMode = mode.SelectedIndex == 0;
-                Save();
-            };
-            modeHint = AddLabel("", Theme.F(9), Theme.Muted, Pad + S(346), S(158), full - S(346), S(36), ContentAlignment.MiddleLeft);
+            TglAllow = AddToggle(TrayContext.FilterName(allowFilter), allowDesc, Pad, S(98), half, (s, e) => Switch(TglAllow, AllowFilter));
+            TglBlock = AddToggle(TrayContext.FilterName(blockFilter), blockDesc, Pad + half + S(24), S(98), half, (s, e) => Switch(TglBlock, BlockFilter));
+            Status = AddLabel("", Theme.FB(9.5f), Theme.Focus, Pad, S(168), Full, S(22), ContentAlignment.MiddleLeft);
 
-            int colW = S(330);
-            listTitle = Section("", Pad, S(210), colW);
-            input = Place(new TextInput("e.g. moodle.tum.de"), Pad, S(234), colW - S(84), TextInput.PreferredHeightNow);
-            input.Submitted += (s, e) => AddSite();
-            btnAdd = Button("Add", Glyph.Add, Pad + colW - S(76), S(234), S(76), S(36), (s, e) => AddSite());
-            list = Place(new SwitchList(), Pad, S(280), colW, S(250));
-            list.EmptyText = "No websites yet";
-            list.IsOn = o => !AppSettings.Has(Ctx.Settings.CurrentDisabledSites, (string)o);
-            list.Toggled += o => ToggleSite((string)o);
-            list.KeyDown += (s, e) => { if (e.KeyCode == Keys.Delete) RemoveSelected(); };
-            btnRemove = Button("Remove", Glyph.Delete, Pad, S(540), S(120), S(34), (s, e) => RemoveSelected());
-            AddLabel("Use the switch to turn a site on or off without deleting it.", Theme.F(8.5f), Theme.Muted, Pad + S(128), S(540), colW - S(128), S(34), ContentAlignment.MiddleLeft);
+            Tabs = Place(new Segmented("Allowed list", "Blocked list"), Pad, S(200), ColW, S(36));
+            Tabs.SelectionChanged += (s, e) => RefreshView();
+            TabHint = AddLabel("", Theme.F(9), Theme.Muted, RightX, S(200), RightW, S(36), ContentAlignment.MiddleLeft);
 
-            int rx = Pad + colW + S(24), rw = full - colW - S(24);
-            Section("Categories · click to turn on/off", rx, S(210), rw);
-            presets = new FlowLayoutPanel();
-            presets.BackColor = Theme.Bg;
-            presets.WrapContents = true;
-            Place(presets, rx, S(234), rw, S(158));
+            ListTitle = Section("", Pad, S(248), ColW);
+            Input = Place(new TextInput(placeholder), Pad, S(272), ColW - S(84), TextInput.PreferredHeightNow);
+            Input.Submitted += (s, e) => AddItem(Input.Box.Text);
+            Button("Add", Glyph.Add, Pad + ColW - S(76), S(272), S(76), S(36), (s, e) => AddItem(Input.Box.Text));
+            List = Place(new DarkList(), Pad, S(listTop), ColW, S(534) - S(listTop));
+            List.EmptyText = "Nothing on this list yet";
+            List.KeyDown += (s, e) => { if (e.KeyCode == Keys.Delete) RemoveSelected(); };
+            Button("Remove", Glyph.Delete, Pad, S(544), S(120), S(34), (s, e) => RemoveSelected());
 
-            Section("Recently blocked", rx, S(398), rw);
-            recent = Place(new DarkList(), rx, S(422), rw, S(108));
-            recent.EmptyText = "Nothing blocked yet";
-            recent.RightText = o => { var be = o as BlockEntry; return be == null ? null : be.Count + "×"; };
-            btnAllow = Button("Allow", Glyph.Check, rx, S(540), S(110), S(34), (s, e) => AllowSelected());
-            Button("Clear", null, rx + S(118), S(540), S(90), S(34), (s, e) => { Ctx.ClearBlockLog(); RefreshRecent(); });
-
-            AddLabel("Blocked secure (https) pages show a browser connection error — that's Fokkus doing its job. " +
-                     "If a site you need breaks, allow its domain from “Recently blocked”.",
-                Theme.F(8.5f), Theme.Muted, Pad, S(588), full, S(40));
+            Section("Quick add · click to add a whole category", RightX, S(248), RightW);
+            chipPanel = new FlowLayoutPanel();
+            chipPanel.BackColor = Theme.Bg;
+            chipPanel.WrapContents = true;
+            Place(chipPanel, RightX, S(272), RightW, S(140));
         }
 
-        List<string> CurrentList { get { return Ctx.Settings.CurrentSites; } }
-        List<string> CurrentOff { get { return Ctx.Settings.CurrentDisabledSites; } }
-
-        // Allow list: switching something ON loosens it; block list: switching OFF loosens it.
-        bool Loosens(bool turningOn) { return Ctx.Settings.AllowListMode ? turningOn : !turningOn; }
-
-        bool StrictRefuses(bool turningOn)
+        void Switch(Toggle t, Filter f)
         {
-            if (Ctx.StrictLocked && Loosens(turningOn))
-            {
-                Ctx.Notify("\U0001F512", "Strict mode is on", "You can only make the list stricter until this focus session ends.", Theme.Focus, 5, null, null);
-                return true;
-            }
-            return false;
+            if (!Ctx.SetFilter(f, t.Checked)) t.SetSilently(Ctx.Settings.IsOn(f));
         }
 
-        void AddSite()
+        // Adding to the allowed list or removing from the blocked list loosens the lock (refused in strict mode).
+        protected bool Refuse(bool loosens) { return Ctx.RefuseLoosening(loosens); }
+
+        protected void AddItem(string raw)
         {
-            string d = HostRules.Normalize(input.Box.Text);
-            if (d == null || StrictRefuses(true)) { input.Flash(); return; }
-            if (!AppSettings.Has(CurrentList, d)) CurrentList.Add(d);
-            CurrentOff.RemoveAll(x => string.Equals(x, d, StringComparison.OrdinalIgnoreCase));
-            input.Box.Text = "";
+            string n = Clean(raw);
+            if (n == null) { Input.Flash(); return; }
+            if (Refuse(AllowedTab)) return;
+            if (!AppSettings.Has(CurrentList, n)) CurrentList.Add(n);
+            Input.Box.Text = "";
             Save();
-        }
-
-        void ToggleSite(string site)
-        {
-            bool turningOn = AppSettings.Has(CurrentOff, site);
-            if (StrictRefuses(turningOn)) return;
-            if (turningOn) CurrentOff.RemoveAll(x => string.Equals(x, site, StringComparison.OrdinalIgnoreCase));
-            else CurrentOff.Add(site);
-            Save();
+            for (int i = 0; i < List.Items.Count; i++)
+                if (string.Equals((string)List.Items[i], n, StringComparison.OrdinalIgnoreCase)) { List.SelectedIndex = i; break; }
         }
 
         void RemoveSelected()
         {
-            var sel = list.SelectedItem as string;
-            if (sel == null || StrictRefuses(!Ctx.Settings.AllowListMode)) return;
-            int idx = list.SelectedIndex;
+            var sel = List.SelectedItem as string;
+            if (sel == null || Refuse(!AllowedTab)) return;
+            int idx = List.SelectedIndex;
             CurrentList.RemoveAll(x => string.Equals(x, sel, StringComparison.OrdinalIgnoreCase));
-            CurrentOff.RemoveAll(x => string.Equals(x, sel, StringComparison.OrdinalIgnoreCase));
             Save();
-            if (list.Items.Count > 0) list.SelectedIndex = Math.Min(idx, list.Items.Count - 1);
+            if (List.Items.Count > 0) List.SelectedIndex = Math.Min(idx, List.Items.Count - 1);
         }
 
+        void AddPreset(Preset p)
+        {
+            var list = CurrentList;
+            if (p.Items.All(i => AppSettings.Has(list, i)) || Refuse(AllowedTab)) return;
+            foreach (var i in p.Items)
+                if (!AppSettings.Has(list, i)) list.Add(i);
+            Save();
+        }
+
+        void BuildChips()
+        {
+            chipsFor = Tabs.SelectedIndex;
+            chipPanel.SuspendLayout();
+            var old = chipPanel.Controls.Cast<Control>().ToArray();
+            chipPanel.Controls.Clear();
+            foreach (var c in old) c.Dispose();
+            chips.Clear();
+            foreach (var p in PresetsFor(AllowedTab))
+            {
+                var preset = p;
+                var b = new FlatButton(p.Name);
+                b.Font = Theme.F(9);
+                b.Size = new Size(TextRenderer.MeasureText("✓  " + p.Name, b.Font).Width + S(20), S(28));
+                b.Margin = new Padding(0, 0, S(6), S(6));
+                b.Tag = preset;
+                b.Click += (s, e) => AddPreset(preset);
+                chips.Add(b);
+                chipPanel.Controls.Add(b);
+            }
+            chipPanel.ResumeLayout();
+        }
+
+        void StyleChips()
+        {
+            var list = CurrentList;
+            foreach (var b in chips)
+            {
+                var p = (Preset)b.Tag;
+                bool all = p.Items.All(i => AppSettings.Has(list, i));
+                b.Text = (all ? "✓  " : "+  ") + p.Name;
+                if (all)
+                {
+                    b.BaseColor = Theme.Blend(Theme.Focus, Theme.Bg, 0.55f);
+                    b.HoverColor = b.BaseColor;
+                    b.TextColor = Theme.Text;
+                    b.Cursor = Cursors.Default;
+                    b.Invalidate();
+                }
+                else
+                {
+                    b.SetPlain();
+                    b.Cursor = Cursors.Hand;
+                }
+                tip.SetToolTip(b, (all ? "Already on your list: " : "Adds: ") + string.Join(", ", p.Items));
+            }
+        }
+
+        public override void RefreshView()
+        {
+            var s = Ctx.Settings;
+            ShowStrict(Ctx.StrictLocked);
+            bool allowOn = s.IsOn(AllowFilter), blockOn = s.IsOn(BlockFilter);
+            TglAllow.SetSilently(allowOn);
+            TglBlock.SetSilently(blockOn);
+            Status.Text = StatusText(s);
+            Status.ForeColor = allowOn || blockOn ? Theme.Focus : Theme.Muted;
+
+            Tabs.SetLabel(0, "Allowed list  (" + ListFor(true).Count + ")");
+            Tabs.SetLabel(1, "Blocked list  (" + ListFor(false).Count + ")");
+            Filter tabFilter = AllowedTab ? AllowFilter : BlockFilter;
+            bool inUse = s.IsOn(tabFilter);
+            TabHint.Text = inUse ? InUseHint(AllowedTab) : "“" + TrayContext.FilterName(tabFilter) + "” is off, so this list isn't used right now.";
+            TabHint.ForeColor = inUse ? Theme.Text : Theme.Muted;
+            ListTitle.Text = ((AllowedTab ? "Allowed " : "Blocked ") + Noun + (inUse ? "" : "  ·  not in use")).ToUpperInvariant();
+            List.SetItems(CurrentList.Cast<object>());
+            if (chipsFor != Tabs.SelectedIndex) BuildChips();
+            StyleChips();
+        }
+    }
+
+    // ---------------------------------------------------------------- Websites
+    class WebsitesPage : FilterPage
+    {
+        readonly DarkList recent;
+
+        public WebsitesPage(TrayContext ctx, Size size)
+            : base(ctx, size, Filter.AllowSites, Filter.BlockSites, "Websites",
+                   "Two separate functions — switch on one, both or none. Breaks are always unrestricted.",
+                   "Only the sites on your allowed list (and their subdomains) work during focus.",
+                   "Sites on your blocked list never work during focus — this wins over allowed.",
+                   "e.g. moodle.tum.de", 318)
+        {
+            Section("Recently blocked", RightX, S(420), RightW);
+            recent = Place(new DarkList(), RightX, S(444), RightW, S(90));
+            recent.EmptyText = "Nothing blocked yet";
+            recent.RightText = o => { var be = o as BlockEntry; return be == null ? null : be.Count + "×"; };
+            Button("Allow", Glyph.Check, RightX, S(544), S(110), S(34), (s, e) => AllowSelected());
+            Button("Clear", null, RightX + S(118), S(544), S(90), S(34), (s, e) => { Ctx.ClearBlockLog(); RefreshRecent(); });
+
+            AddLabel("Works in Chrome, Edge, Brave, Opera and Firefox (with “use system proxy settings”). Blocked secure (https) pages " +
+                     "show a browser connection error — that's Fokkus doing its job. If a site you need breaks, select it under " +
+                     "“Recently blocked” and press Allow.",
+                Theme.F(8.5f), Theme.Muted, Pad, S(590), Full, S(48));
+        }
+
+        protected override string Noun { get { return "websites"; } }
+        protected override List<string> ListFor(bool allowed) { return allowed ? Ctx.Settings.AllowedSites : Ctx.Settings.BlockedSites; }
+        protected override Preset[] PresetsFor(bool allowed) { return allowed ? Presets.AllowSites : Presets.BlockSites; }
+        protected override string Clean(string raw) { return HostRules.Normalize(raw); }
+
+        protected override string InUseHint(bool allowed)
+        {
+            return allowed ? "In use — during focus only these sites work." : "In use — during focus these sites never work.";
+        }
+
+        protected override string StatusText(AppSettings s)
+        {
+            int a = s.AllowedSites.Count, b = s.BlockedSites.Count;
+            if (s.AllowSitesOn && s.BlockSitesOn) return "During focus: only your " + a + " allowed sites work, and your " + b + " blocked sites never do.";
+            if (s.AllowSitesOn) return "During focus: only your " + a + " allowed sites work. Everything else is blocked.";
+            if (s.BlockSitesOn) return "During focus: everything works except your " + b + " blocked sites.";
+            return "Both off — every website works during focus.";
+        }
+
+        // Makes a recently blocked site work: takes it off the blocked list and, if the allowed list is in use, adds it there.
         void AllowSelected()
         {
             var be = recent.SelectedItem as BlockEntry;
-            if (be == null || StrictRefuses(Ctx.Settings.AllowListMode)) return;
+            if (be == null || Refuse(true)) return;
             var s = Ctx.Settings;
-            if (s.AllowListMode)
-            {
-                if (!AppSettings.Has(s.AllowedSites, be.Domain)) s.AllowedSites.Add(be.Domain);
-                s.DisabledAllowedSites.RemoveAll(x => string.Equals(x, be.Domain, StringComparison.OrdinalIgnoreCase));
-            }
-            else
-                foreach (var x in s.BlockedSites.Where(x => be.Domain == x || be.Domain.EndsWith("." + x) || x.EndsWith("." + be.Domain)).ToList())
-                    if (!AppSettings.Has(s.DisabledBlockedSites, x)) s.DisabledBlockedSites.Add(x);
-            Ctx.RemoveFromBlockLog(be.Domain);
+            string d = be.Domain;
+            if (s.BlockSitesOn)
+                s.BlockedSites.RemoveAll(x => x == d || d.EndsWith("." + x, StringComparison.Ordinal) || x.EndsWith("." + d, StringComparison.Ordinal));
+            if (s.AllowSitesOn && !AppSettings.Has(s.AllowedSites, d)) s.AllowedSites.Add(d);
+            Ctx.RemoveFromBlockLog(d);
             Save();
-        }
-
-        Preset[] CurrentPresets { get { return Ctx.Settings.AllowListMode ? Presets.AllowSites : Presets.BlockSites; } }
-
-        void BuildPresets(bool allow)
-        {
-            presetsForAllow = allow;
-            presets.SuspendLayout();
-            foreach (Control c in presets.Controls) c.Dispose();
-            presets.Controls.Clear();
-            chips.Clear();
-            var tip = new ToolTip();
-            foreach (var p in allow ? Presets.AllowSites : Presets.BlockSites)
-            {
-                var preset = p;
-                var b = Categories.Chip(p.Name, string.Join(", ", p.Items), tip, S(22));
-                b.Click += (s, e) =>
-                {
-                    bool turningOn = !Categories.IsOn(preset, CurrentList, CurrentOff);
-                    if (StrictRefuses(turningOn)) return;
-                    Categories.Toggle(preset, CurrentPresets, CurrentList, CurrentOff);
-                    Save();
-                };
-                chips.Add(b);
-                presets.Controls.Add(b);
-            }
-            presets.ResumeLayout();
         }
 
         public void RefreshRecent()
@@ -219,52 +244,23 @@ namespace Fokkus
 
         public override void RefreshView()
         {
-            var s = Ctx.Settings;
-            bool locked = Ctx.StrictLocked;
-            ShowStrict(locked);
-            tglEnabled.SetSilently(s.BlockWebsites);
-            mode.SetSilently(s.AllowListMode ? 0 : 1);
-            modeHint.Text = s.AllowListMode
-                ? "Strict: everything except the sites switched on is blocked (subdomains included)."
-                : "Relaxed: only the sites switched on (and their subdomains) are blocked.";
-            int on = s.ActiveSites(s.AllowListMode).Count();
-            listTitle.Text = (s.AllowListMode ? "Allowed sites" : "Blocked sites").ToUpperInvariant() + "  (" + on + " of " + CurrentList.Count + " on)";
-            list.SetItems(CurrentList.Cast<object>());
-            if (presetsForAllow != s.AllowListMode) BuildPresets(s.AllowListMode);
-            var ps = CurrentPresets;
-            for (int i = 0; i < chips.Count && i < ps.Length; i++) Categories.Style(chips[i], Categories.IsOn(ps[i], CurrentList, CurrentOff));
-            btnAllow.Text = s.AllowListMode ? "Allow" : "Unblock";
+            base.RefreshView();
             RefreshRecent();
-            mode.Enabled = !locked;
         }
     }
 
     // ---------------------------------------------------------------- Apps
-    class AppsPage : Page
+    class AppsPage : FilterPage
     {
-        readonly Toggle tglEnabled;
-        readonly TextInput input;
         readonly ComboBox running;
-        readonly SwitchList list;
-        readonly List<FlatButton> chips = new List<FlatButton>();
-        readonly Label listTitle;
 
-        public AppsPage(TrayContext ctx, Size size) : base(ctx, size)
+        public AppsPage(TrayContext ctx, Size size)
+            : base(ctx, size, Filter.AllowApps, Filter.BlockApps, "Apps",
+                   "The same two functions for Windows programs — switch on one, both or none.",
+                   "Apps that aren't on your allowed list are minimized during focus — never closed.",
+                   "Apps on your blocked list are closed during focus — this wins over allowed.",
+                   "Process name, e.g. Discord", 364)
         {
-            Header("Apps", "Close distracting Windows programs while you focus.");
-            int full = Width - 2 * Pad, colW = S(330);
-            tglEnabled = AddToggle("Close these apps during focus", "They get a polite close request first, then are ended if they keep running (e.g. Discord hiding in the tray).", Pad, S(98), full, (s, e) =>
-            {
-                if (!tglEnabled.Checked && Ctx.StrictLocked) { tglEnabled.SetSilently(true); return; }
-                Ctx.Settings.BlockApps = tglEnabled.Checked;
-                Save();
-            });
-
-            listTitle = Section("", Pad, S(166), colW);
-            input = Place(new TextInput("Process name, e.g. Discord"), Pad, S(190), colW - S(84), TextInput.PreferredHeightNow);
-            input.Submitted += (s, e) => AddApp(input.Box.Text);
-            Button("Add", Glyph.Add, Pad + colW - S(76), S(190), S(76), S(36), (s, e) => AddApp(input.Box.Text));
-
             running = new ComboBox();
             running.DropDownStyle = ComboBoxStyle.DropDownList;
             running.FlatStyle = FlatStyle.Standard;
@@ -276,57 +272,45 @@ namespace Fokkus
             running.ItemHeight = S(26);
             running.DrawItem += DrawComboItem;
             running.DropDown += (s, e) => LoadRunning();
-            Place(running, Pad, S(236), colW - S(84), S(36));
-            Button("Add", Glyph.Add, Pad + colW - S(76), S(236), S(76), S(34), (s, e) =>
+            Place(running, Pad, S(318), ColW - S(84), S(36));
+            Button("Add", Glyph.Add, Pad + ColW - S(76), S(318), S(76), S(34), (s, e) =>
             {
                 var name = running.SelectedItem as string;
-                if (name != null && !name.StartsWith("(")) AddApp(name);
+                if (name != null && !name.StartsWith("(")) AddItem(name);
             });
             LoadRunning();
 
-            list = Place(new SwitchList(), Pad, S(284), colW, S(246));
-            list.EmptyText = "No apps yet";
-            list.IsOn = o => !AppSettings.Has(Ctx.Settings.DisabledApps, (string)o);
-            list.Toggled += o => ToggleApp((string)o);
-            list.KeyDown += (s, e) => { if (e.KeyCode == Keys.Delete) RemoveSelected(); };
-            Button("Remove", Glyph.Delete, Pad, S(540), S(120), S(34), (s, e) => RemoveSelected());
-            AddLabel("Switch an app off to let it run during focus without deleting it.", Theme.F(8.5f), Theme.Muted, Pad + S(128), S(540), colW - S(128), S(34), ContentAlignment.MiddleLeft);
-
-            int rx = Pad + colW + S(24), rw = full - colW - S(24);
-            Section("Categories · click to turn on/off", rx, S(166), rw);
-            var presets = new FlowLayoutPanel();
-            presets.BackColor = Theme.Bg;
-            Place(presets, rx, S(190), rw, S(90));
-            var tip = new ToolTip();
-            foreach (var p in Presets.Apps)
-            {
-                var preset = p;
-                var b = Categories.Chip(p.Name, string.Join(", ", p.Items), tip, S(22));
-                b.Click += (s, e) =>
-                {
-                    bool turningOn = !Categories.IsOn(preset, Ctx.Settings.BlockedApps, Ctx.Settings.DisabledApps);
-                    if (StrictRefuses(turningOn)) return;
-                    Categories.Toggle(preset, Presets.Apps, Ctx.Settings.BlockedApps, Ctx.Settings.DisabledApps);
-                    Save();
-                };
-                chips.Add(b);
-                presets.Controls.Add(b);
-            }
-
-            AddLabel("How to find a name: pick it from “Running apps” on the left, or open Task Manager → Details " +
-                     "and use the name without “.exe”.\n\nBrowsers are not closed here — use the Websites page to filter what they can open.",
-                Theme.F(9), Theme.Muted, rx, S(290), rw, S(140));
+            AddLabel("How to find a name: pick it from “Running apps” on the left, or open Task Manager → Details and use the " +
+                     "name without “.exe”.\n\nWindows itself, File Explorer and Fokkus are never minimized or closed. " +
+                     "What your browser can open is set on the Websites page.",
+                Theme.F(9), Theme.Muted, RightX, S(420), RightW, S(114));
+            AddLabel("Minimized apps wait in the taskbar until the break, so nothing is lost. Blocked apps get a polite close " +
+                     "request first and are ended if they keep running (e.g. Discord hiding in the tray).",
+                Theme.F(8.5f), Theme.Muted, Pad, S(590), Full, S(48));
         }
 
-        // Blocked-app list: switching an app OFF (or removing it) loosens the lock.
-        bool StrictRefuses(bool turningOn)
+        protected override string Noun { get { return "apps"; } }
+        protected override List<string> ListFor(bool allowed) { return allowed ? Ctx.Settings.AllowedApps : Ctx.Settings.BlockedApps; }
+        protected override Preset[] PresetsFor(bool allowed) { return allowed ? Presets.AllowApps : Presets.Apps; }
+
+        protected override string Clean(string raw)
         {
-            if (Ctx.StrictLocked && !turningOn)
-            {
-                Ctx.Notify("\U0001F512", "Strict mode is on", "You can only block more apps until this focus session ends.", Theme.Focus, 5, null, null);
-                return true;
-            }
-            return false;
+            string n = AppBlocker.CleanName(raw);
+            return n.Length == 0 || AppGuard.IsEssential(n) ? null : n;
+        }
+
+        protected override string InUseHint(bool allowed)
+        {
+            return allowed ? "In use — during focus any other app is minimized." : "In use — these apps are closed during focus.";
+        }
+
+        protected override string StatusText(AppSettings s)
+        {
+            int a = s.AllowedApps.Count, b = s.BlockedApps.Count;
+            if (s.AllowAppsOn && s.BlockAppsOn) return "During focus: your " + b + " blocked apps are closed, and any app that isn't allowed is minimized.";
+            if (s.AllowAppsOn) return "During focus: only your " + a + " allowed apps can stay open in front — others are minimized.";
+            if (s.BlockAppsOn) return "During focus: your " + b + " blocked apps are closed. Everything else runs normally.";
+            return "Both off — every app can be used during focus.";
         }
 
         void DrawComboItem(object sender, DrawItemEventArgs e)
@@ -347,49 +331,6 @@ namespace Fokkus
             foreach (var n in names) running.Items.Add(n);
             running.SelectedIndex = 0;
             running.EndUpdate();
-        }
-
-        void AddApp(string raw)
-        {
-            string n = AppBlocker.CleanName(raw);
-            if (n.Length == 0 || string.Equals(n, "Fokkus", StringComparison.OrdinalIgnoreCase) || string.Equals(n, "explorer", StringComparison.OrdinalIgnoreCase))
-            {
-                input.Flash();
-                return;
-            }
-            if (!AppSettings.Has(Ctx.Settings.BlockedApps, n)) Ctx.Settings.BlockedApps.Add(n);
-            Ctx.Settings.DisabledApps.RemoveAll(x => string.Equals(x, n, StringComparison.OrdinalIgnoreCase));
-            input.Box.Text = "";
-            Save();
-        }
-
-        void ToggleApp(string app)
-        {
-            bool turningOn = AppSettings.Has(Ctx.Settings.DisabledApps, app);
-            if (StrictRefuses(turningOn)) return;
-            if (turningOn) Ctx.Settings.DisabledApps.RemoveAll(x => string.Equals(x, app, StringComparison.OrdinalIgnoreCase));
-            else Ctx.Settings.DisabledApps.Add(app);
-            Save();
-        }
-
-        void RemoveSelected()
-        {
-            var sel = list.SelectedItem as string;
-            if (sel == null || StrictRefuses(false)) return;
-            Ctx.Settings.BlockedApps.RemoveAll(x => string.Equals(x, sel, StringComparison.OrdinalIgnoreCase));
-            Ctx.Settings.DisabledApps.RemoveAll(x => string.Equals(x, sel, StringComparison.OrdinalIgnoreCase));
-            Save();
-        }
-
-        public override void RefreshView()
-        {
-            var s = Ctx.Settings;
-            ShowStrict(Ctx.StrictLocked);
-            tglEnabled.SetSilently(s.BlockApps);
-            listTitle.Text = "CLOSED DURING FOCUS  (" + s.ActiveApps.Count() + " of " + s.BlockedApps.Count + " on)";
-            list.SetItems(s.BlockedApps.Cast<object>());
-            for (int i = 0; i < chips.Count && i < Presets.Apps.Length; i++)
-                Categories.Style(chips[i], Categories.IsOn(Presets.Apps[i], s.BlockedApps, s.DisabledApps));
         }
     }
 }

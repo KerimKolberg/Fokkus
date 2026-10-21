@@ -22,8 +22,11 @@ object Domains {
         return rules.any { r -> h == r || h.endsWith(".$r") }
     }
 
-    fun siteAllowed(host: String, s: AppSettings): Boolean =
-        if (s.webAllowMode) matches(host, s.activeAllowedSites) else !matches(host, s.activeBlockedSites)
+    /** Blocked list (if on) always wins; with the allowed list on, only its sites work; both off = everything works. */
+    fun siteAllowed(host: String, s: AppSettings): Boolean {
+        if (s.blockSitesOn && matches(host, s.blockedSites)) return false
+        return !s.allowSitesOn || matches(host, s.allowedSites)
+    }
 
     /** Reads the host out of what a browser shows in its address bar ("moodle.tum.de/course/..."). */
     fun hostFromAddressBar(raw: String): String? {

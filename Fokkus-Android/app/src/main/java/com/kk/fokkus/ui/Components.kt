@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +31,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,6 +39,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kk.fokkus.R
+import com.kk.fokkus.data.Preset
 
 @Composable
 fun TimerRing(
@@ -79,23 +83,89 @@ fun TimerRing(
     }
 }
 
-/** Big on/off button: icon, label and an ON/OFF pill. */
+/** Big on/off button: icon, label (+ optional small second line) and an ON/OFF pill. */
 @Composable
-fun QuickToggle(label: String, icon: Int, checked: Boolean, enabled: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
+fun QuickToggle(
+    label: String, icon: Int, checked: Boolean, enabled: Boolean, modifier: Modifier = Modifier, sub: String? = null,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
         modifier.clip(RoundedCornerShape(14.dp)).background(Palette.Surface)
             .clickable(enabled = enabled) { onChange(!checked) }
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = if (sub != null) 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconRes(icon, if (checked) Palette.Focus else Palette.Muted, 20.dp)
         Spacer(Modifier.width(8.dp))
-        Text(label, color = if (enabled) Palette.Text else Palette.Muted, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1)
+        Column(Modifier.weight(1f)) {
+            Text(label, color = if (enabled) Palette.Text else Palette.Muted, fontSize = 14.sp, maxLines = 1)
+            if (sub != null) Text(sub, color = Palette.Muted, fontSize = 11.sp, maxLines = 1, lineHeight = 13.sp)
+        }
         Box(
             Modifier.clip(RoundedCornerShape(10.dp)).background(if (checked) Palette.Focus else Palette.Surface2)
                 .padding(horizontal = 8.dp, vertical = 3.dp),
         ) {
             Text(if (checked) "ON" else "OFF", color = if (checked) Palette.OnAccent else Palette.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/**
+ * The two independent functions of the Websites / Apps screens, each with its own switch,
+ * plus a one-line summary of what happens during focus. Strict mode: a function can be switched on, not off.
+ */
+@Composable
+fun FilterCard(
+    allowTitle: String, allowDesc: String, allowOn: Boolean, onAllow: (Boolean) -> Unit,
+    blockTitle: String, blockDesc: String, blockOn: Boolean, onBlock: (Boolean) -> Unit,
+    strict: Boolean, status: String, footer: String? = null,
+) {
+    Card(Modifier.padding(top = 8.dp)) {
+        Column {
+            SwitchRow(allowTitle, allowOn, onAllow, description = allowDesc, enabled = !strict || !allowOn)
+            SwitchRow(blockTitle, blockOn, onBlock, description = blockDesc, enabled = !strict || !blockOn)
+            Text(
+                status, color = if (allowOn || blockOn) Palette.Focus else Palette.Muted, fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp),
+            )
+            if (footer != null) Text(footer, color = Palette.Muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+/** "Allowed list | Blocked list" tabs with a note whether the shown list is in use. */
+@Composable
+fun ListTabs(tab: Int, allowedCount: Int, blockedCount: Int, inUse: Boolean, inUseHint: String, functionName: String, onTab: (Int) -> Unit) {
+    Column(Modifier.padding(top = 16.dp)) {
+        Segmented(listOf("Allowed list ($allowedCount)", "Blocked list ($blockedCount)"), tab, onTab)
+        Text(
+            if (inUse) inUseHint else "“$functionName” is off, so this list isn't used right now.",
+            color = if (inUse) Palette.Text else Palette.Muted, fontSize = 13.sp, lineHeight = 17.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+}
+
+/** Category buttons that add a whole preset to the list (they never remove anything). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun QuickAddChips(presets: List<Preset>, has: (String) -> Boolean, enabled: Boolean, onAdd: (Preset) -> Unit) {
+    if (presets.isEmpty()) return
+    SectionTitle("Quick add · tap to add a whole category")
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        presets.forEach { p ->
+            val all = p.items.all(has)
+            Box(
+                Modifier.clip(RoundedCornerShape(10.dp))
+                    .background(if (all) lerp(Palette.Focus, Palette.Bg, 0.55f) else Palette.Surface2)
+                    .clickable(enabled = enabled && !all) { onAdd(p) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    (if (all) "✓  " else "+  ") + p.name, fontSize = 14.sp,
+                    color = if (all || enabled) Palette.Text else Palette.Muted, fontWeight = if (all) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
         }
     }
 }

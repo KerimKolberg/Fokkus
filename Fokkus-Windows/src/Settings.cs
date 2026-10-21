@@ -24,6 +24,9 @@ namespace Fokkus
         }
     }
 
+    // The four blocking functions, each switched on or off on its own.
+    public enum Filter { AllowSites, BlockSites, AllowApps, BlockApps }
+
     public class AppSettings
     {
         // Study plan
@@ -52,38 +55,60 @@ namespace Fokkus
         public bool StrictMode { get; set; }
         public bool SoundEnabled { get; set; }
 
-        // Websites (entries in the Disabled* lists stay in the list but are switched off)
-        public bool BlockWebsites { get; set; }
-        public bool AllowListMode { get; set; }
+        // Websites: two independent functions.
+        //   AllowSitesOn -> during focus only the allowed sites work
+        //   BlockSitesOn -> during focus the blocked sites never work (also wins over the allowed list)
+        public bool AllowSitesOn { get; set; }
+        public bool BlockSitesOn { get; set; }
         public List<string> AllowedSites { get; set; }
         public List<string> BlockedSites { get; set; }
+
+        // Apps: the same two functions.
+        //   AllowAppsOn -> any other app window is minimized during focus (never closed, so no work is lost)
+        //   BlockAppsOn -> blocked apps are closed during focus
+        public bool AllowAppsOn { get; set; }
+        public bool BlockAppsOn { get; set; }
+        public List<string> AllowedApps { get; set; }
+        public List<string> BlockedApps { get; set; }
+
+        // Older versions (read only to upgrade saved settings).
+        public bool BlockWebsites { get; set; }
+        public bool AllowListMode { get; set; }
+        public bool BlockApps { get; set; }
         public List<string> DisabledAllowedSites { get; set; }
         public List<string> DisabledBlockedSites { get; set; }
-
-        // Apps
-        public bool BlockApps { get; set; }
-        public List<string> BlockedApps { get; set; }
         public List<string> DisabledApps { get; set; }
 
         // Bumped when defaults change, so existing settings get the new defaults once.
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 3;
         public int SettingsVersion { get; set; }
 
-        public List<string> CurrentSites { get { return AllowListMode ? AllowedSites : BlockedSites; } }
-        public List<string> CurrentDisabledSites { get { return AllowListMode ? DisabledAllowedSites : DisabledBlockedSites; } }
+        public bool IsOn(Filter f)
+        {
+            switch (f)
+            {
+                case Filter.AllowSites: return AllowSitesOn;
+                case Filter.BlockSites: return BlockSitesOn;
+                case Filter.AllowApps: return AllowAppsOn;
+                default: return BlockAppsOn;
+            }
+        }
+
+        public void SetOn(Filter f, bool on)
+        {
+            switch (f)
+            {
+                case Filter.AllowSites: AllowSitesOn = on; break;
+                case Filter.BlockSites: BlockSitesOn = on; break;
+                case Filter.AllowApps: AllowAppsOn = on; break;
+                default: BlockAppsOn = on; break;
+            }
+        }
 
         public static bool Has(List<string> list, string item)
         {
             return list.Any(x => string.Equals(x, item, StringComparison.OrdinalIgnoreCase));
         }
-
-        public IEnumerable<string> ActiveSites(bool allowList)
-        {
-            var off = allowList ? DisabledAllowedSites : DisabledBlockedSites;
-            return (allowList ? AllowedSites : BlockedSites).Where(x => !Has(off, x));
-        }
-
-        public IEnumerable<string> ActiveApps { get { return BlockedApps.Where(x => !Has(DisabledApps, x)); } }
 
         // Tips
         public bool TipsEnabled { get; set; }
@@ -112,16 +137,21 @@ namespace Fokkus
             StrictMode = false;
             SoundEnabled = true;
 
-            BlockWebsites = true;
-            AllowListMode = true;
+            AllowSitesOn = true;
+            BlockSitesOn = false;
             AllowedSites = Presets.Collect(Presets.AllowSites, Presets.DefaultAllowPresets);
             BlockedSites = Presets.Collect(Presets.BlockSites, Presets.DefaultBlockPresets);
 
+            AllowAppsOn = false;
+            BlockAppsOn = true;
+            AllowedApps = Presets.Collect(Presets.AllowApps, Presets.DefaultAllowAppPresets);
+            BlockedApps = Presets.Collect(Presets.Apps, Presets.DefaultAppPresets);
+
+            BlockWebsites = true;
+            AllowListMode = true;
+            BlockApps = true;
             DisabledAllowedSites = new List<string>();
             DisabledBlockedSites = new List<string>();
-
-            BlockApps = true;
-            BlockedApps = Presets.Collect(Presets.Apps, Presets.DefaultAppPresets);
             DisabledApps = new List<string>();
 
             TipsEnabled = true;
@@ -186,7 +216,7 @@ namespace Fokkus
         }
 
         // One-time changes for settings saved by older versions.
-        void Upgrade()
+        internal void Upgrade()
         {
             if (SettingsVersion < 2)
             {
@@ -194,6 +224,21 @@ namespace Fokkus
                 foreach (var p in Presets.AllowSites.Where(x => x.Name == Presets.CodingPreset))
                     foreach (var item in p.Items)
                         if (!Has(AllowedSites, item)) AllowedSites.Add(item);
+            }
+            if (SettingsVersion < 3)
+            {
+                // v3: separate on/off functions (allowed / blocked) instead of one mode switch,
+                // and no more per-entry switches: entries that were switched off are removed.
+                AllowSitesOn = BlockWebsites && AllowListMode;
+                BlockSitesOn = BlockWebsites && !AllowListMode;
+                BlockAppsOn = BlockApps;
+                AllowAppsOn = false;
+                AllowedSites.RemoveAll(x => Has(DisabledAllowedSites, x));
+                BlockedSites.RemoveAll(x => Has(DisabledBlockedSites, x));
+                BlockedApps.RemoveAll(x => Has(DisabledApps, x));
+                DisabledAllowedSites.Clear();
+                DisabledBlockedSites.Clear();
+                DisabledApps.Clear();
             }
             SettingsVersion = CurrentVersion;
         }
@@ -236,10 +281,10 @@ namespace Fokkus
             AllowedSites = Clean(AllowedSites, HostRules.Normalize);
             BlockedSites = Clean(BlockedSites, HostRules.Normalize);
             BlockedApps = Clean(BlockedApps, AppBlocker.CleanName);
-            // Switched-off entries must still exist in their list.
-            DisabledAllowedSites = Clean(DisabledAllowedSites, HostRules.Normalize).Where(x => Has(AllowedSites, x)).ToList();
-            DisabledBlockedSites = Clean(DisabledBlockedSites, HostRules.Normalize).Where(x => Has(BlockedSites, x)).ToList();
-            DisabledApps = Clean(DisabledApps, AppBlocker.CleanName).Where(x => Has(BlockedApps, x)).ToList();
+            AllowedApps = Clean(AllowedApps, AppBlocker.CleanName);
+            if (DisabledAllowedSites == null) DisabledAllowedSites = new List<string>();
+            if (DisabledBlockedSites == null) DisabledBlockedSites = new List<string>();
+            if (DisabledApps == null) DisabledApps = new List<string>();
             if (DisabledTipCategories == null) DisabledTipCategories = new List<string>();
             if (Subjects == null) Subjects = new List<Subject>();
             foreach (var s in Subjects)

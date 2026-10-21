@@ -70,6 +70,21 @@ namespace Fokkus
 
         public static readonly string[] DefaultAppPresets = { "Chat", "Gaming" };
 
+        // Programs that keep working when "Allowed apps" is on (process names without .exe).
+        public static readonly Preset[] AllowApps =
+        {
+            new Preset("Coding", "Code", "Cursor", "devenv", "idea64", "pycharm64", "clion64", "webstorm64", "rider64", "studio64",
+                       "WindowsTerminal", "cmd", "powershell", "pwsh", "GitHubDesktop", "mintty"),
+            new Preset("AI", "Claude", "ChatGPT", "Perplexity"),
+            new Preset("Browsers", "chrome", "msedge", "firefox", "brave", "opera", "vivaldi"),
+            new Preset("Office & PDF", "WINWORD", "EXCEL", "POWERPNT", "ONENOTE", "Acrobat", "AcroRd32", "SumatraPDF", "notepad",
+                       "notepad++", "CalculatorApp"),
+            new Preset("Notes & study", "Obsidian", "Notion", "Zotero", "anki", "xournalpp", "MATLAB", "rstudio", "spyder", "Mathematica"),
+            new Preset("Meetings", "ms-teams", "Teams", "Zoom"),
+        };
+
+        public static readonly string[] DefaultAllowAppPresets = { "Coding", "AI", "Browsers", "Office & PDF", "Notes & study", "Meetings" };
+
         public static List<string> Collect(Preset[] presets, string[] names)
         {
             return presets.Where(p => names.Contains(p.Name)).SelectMany(p => p.Items)
@@ -81,8 +96,8 @@ namespace Fokkus
         public static bool IsKnownDistraction(string host)
         {
             if (distractions == null)
-                distractions = new HostRules(true, BlockSites.SelectMany(p => p.Items));
-            return distractions.Matches(HostRules.CleanHost(host));
+                distractions = new HostRules(false, null, true, BlockSites.SelectMany(p => p.Items));
+            return distractions.MatchesBlocked(host);
         }
     }
 }

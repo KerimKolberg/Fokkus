@@ -79,10 +79,12 @@ object Blocking {
 
     fun isAppBlocked(ctx: Context, pkg: String): Boolean {
         val s = SettingsStore.current
-        if (!TimerEngine.current.lockedIn || !s.blockApps) return false
-        if (pkg in s.allowedApps) return false
+        if (!TimerEngine.current.lockedIn) return false
         if (pkg in essentials(ctx)) return false
-        if (s.webFilter && isFilterableBrowser(pkg)) return false // usable, but only for allowed sites
+        if (s.blockAppsOn && pkg in s.blockedApps) return true // blocked list wins
+        if (!s.allowAppsOn) return false
+        if (pkg in s.allowedApps) return false
+        if (s.anySiteFilter && isFilterableBrowser(pkg)) return false // usable, but websites are filtered
         return true
     }
 }

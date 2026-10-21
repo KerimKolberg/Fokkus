@@ -26,31 +26,54 @@ namespace Fokkus
             check("normalize junk", HostRules.Normalize("not a domain") == null);
             check("base domain", HostRules.BaseDomain("i.ytimg.com") == "ytimg.com" && HostRules.BaseDomain("www.bbc.co.uk") == "bbc.co.uk");
 
-            var allow = new HostRules(true, new[] { "tum.de", "example.com" });
-            check("allow: subdomain", allow.IsAllowed("campus.tum.de"));
-            check("allow: exact", allow.IsAllowed("tum.de"));
-            check("allow: lookalike blocked", !allow.IsAllowed("eviltum.de"));
-            check("allow: other blocked", !allow.IsAllowed("www.youtube.com"));
-            check("allow: localhost/LAN", allow.IsAllowed("localhost") && allow.IsAllowed("192.168.178.1") && allow.IsAllowed("127.0.0.1"));
-            var block = new HostRules(false, new[] { "youtube.com" });
-            check("block: listed", !block.IsAllowed("m.youtube.com"));
-            check("block: others ok", block.IsAllowed("moodle.tum.de"));
-            check("distraction detection", Presets.IsKnownDistraction("www.instagram.com") && !Presets.IsKnownDistraction("moodle.tum.de"));
+            // "Allowed websites" only
+            var allow = new HostRules(true, new[] { "tum.de", "example.com" }, false, new[] { "youtube.com" });
+            check("allowed: subdomain", allow.IsAllowed("campus.tum.de"));
+            check("allowed: exact", allow.IsAllowed("tum.de"));
+            check("allowed: lookalike blocked", !allow.IsAllowed("eviltum.de"));
+            check("allowed: other blocked", !allow.IsAllowed("www.wikipedia.org"));
+            check("allowed: localhost/LAN", allow.IsAllowed("localhost") && allow.IsAllowed("192.168.178.1") && allow.IsAllowed("127.0.0.1"));
             check("bypass list", allow.BuildBypassList().Contains(";tum.de;*.tum.de") && allow.BuildBypassList().Contains(SystemProxy.Signature));
 
-            // On/off switches + categories
+            // "Blocked websites" only: everything else works
+            var block = new HostRules(false, new[] { "tum.de" }, true, new[] { "youtube.com" });
+            check("blocked: listed", !block.IsAllowed("m.youtube.com"));
+            check("blocked: everything else works", block.IsAllowed("moodle.tum.de") && block.IsAllowed("www.wikipedia.org"));
+            check("blocked: allowed list not in bypass", !block.BuildBypassList().Contains("tum.de"));
+
+            // Both on: only allowed sites work, and blocked ones never do (even when also allowed)
+            var both = new HostRules(true, new[] { "google.com", "tum.de" }, true, new[] { "youtube.com", "mail.google.com" });
+            check("both: allowed works", both.IsAllowed("docs.google.com") && both.IsAllowed("tum.de"));
+            check("both: blocked wins over allowed", !both.IsAllowed("mail.google.com"));
+            check("both: unlisted blocked", !both.IsAllowed("www.youtube.com") && !both.IsAllowed("reddit.com"));
+            check("both: overlapping allowed rule not bypassed", !both.BuildBypassList().Contains(";google.com") && both.BuildBypassList().Contains(";tum.de"));
+
+            // Both off: nothing filtered
+            var none = new HostRules(false, new[] { "tum.de" }, false, new[] { "youtube.com" });
+            check("both off: nothing filtered", !none.Active && none.IsAllowed("www.youtube.com"));
+            check("distraction detection", Presets.IsKnownDistraction("www.instagram.com") && !Presets.IsKnownDistraction("moodle.tum.de"));
+
+            // Defaults + upgrade of settings saved by v1.1
             var sw = new AppSettings();
+            check("defaults: allowed websites on, blocked apps on", sw.AllowSitesOn && !sw.BlockSitesOn && !sw.AllowAppsOn && sw.BlockAppsOn);
             check("GitHub & coding allowed by default", HostRules.From(sw).IsAllowed("github.githubassets.com") && HostRules.From(sw).IsAllowed("marketplace.visualstudio.com"));
-            sw.DisabledAllowedSites.Add("github.com");
-            check("switched-off site is blocked", !HostRules.From(sw).IsAllowed("github.com") && HostRules.From(sw).IsAllowed("moodle.tum.de"));
-            var coding = Presets.AllowSites.First(p => p.Name == Presets.CodingPreset);
-            check("category off while an entry is off", !Categories.IsOn(coding, sw.AllowedSites, sw.DisabledAllowedSites));
-            Categories.Toggle(coding, Presets.AllowSites, sw.AllowedSites, sw.DisabledAllowedSites);
-            check("category on switches entries back on", Categories.IsOn(coding, sw.AllowedSites, sw.DisabledAllowedSites) && HostRules.From(sw).IsAllowed("github.com"));
-            Categories.Toggle(coding, Presets.AllowSites, sw.AllowedSites, sw.DisabledAllowedSites);
-            check("category off keeps entries but blocks them", AppSettings.Has(sw.AllowedSites, "vscode.dev") && !HostRules.From(sw).IsAllowed("vscode.dev"));
-            sw.DisabledApps.Add("Discord");
-            check("switched-off app is not closed", !sw.ActiveApps.Contains("Discord") && sw.ActiveApps.Contains("steam"));
+            check("VS Code + Claude allowed apps by default", AppSettings.Has(sw.AllowedApps, "Code") && AppSettings.Has(sw.AllowedApps, "Claude"));
+            var old = new AppSettings();
+            old.SettingsVersion = 2;
+            old.BlockWebsites = true;
+            old.AllowListMode = false;
+            old.BlockApps = false;
+            old.DisabledBlockedSites.Add("reddit.com");
+            old.Upgrade();
+            check("upgrade: block mode becomes blocked websites", !old.AllowSitesOn && old.BlockSitesOn && !old.BlockAppsOn && !old.AllowAppsOn);
+            check("upgrade: switched-off entries removed", !AppSettings.Has(old.BlockedSites, "reddit.com") && old.DisabledBlockedSites.Count == 0 && old.SettingsVersion == AppSettings.CurrentVersion);
+
+            // Allowed apps
+            var guard = new AppGuard();
+            guard.Update(true, new[] { "Code", "chrome.exe" });
+            check("allowed apps: listed and Windows essentials stay", guard.Allows("code") && guard.Allows("chrome") && guard.Allows("explorer") && guard.Allows("Fokkus"));
+            check("allowed apps: others minimized", !guard.Allows("Discord") && !guard.Allows("steam"));
+            guard.Update(false, new string[0]);
 
             // Study plan + statistics
             check("weekday index", Planner.DayIndex(new DateTime(2026, 10, 5)) == 0 && Planner.DayIndex(new DateTime(2026, 10, 4)) == 6);
@@ -97,6 +120,9 @@ namespace Fokkus
             check("https blocked site refused (youtube.com)", Fetch("https://www.youtube.com/", proxy.Port, sb) == 403);
             check("http blocked site gets block page", Fetch("http://neverssl.com/", proxy.Port, sb) == 403);
             check("blocked events raised", blockedEvents >= 2);
+            proxy.Rules = block;
+            check("blocked-only: other https site passes (example.com)", Fetch("https://example.com/", proxy.Port, sb) == 200);
+            check("blocked-only: blocked site refused (youtube.com)", Fetch("https://www.youtube.com/", proxy.Port, sb) == 403);
             proxy.Stop();
 
             sb.AppendLine(failed == 0 ? "ALL PASSED" : failed + " FAILED");

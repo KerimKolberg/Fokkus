@@ -6,7 +6,7 @@ A Pomodoro study app for **Windows** and **Android**. Plan your week per subject
 Fokkus-Windows/   – C# source, build.cmd, installer/ (Inno Setup script)
 Fokkus-Android/   – Kotlin / Jetpack Compose project (open in Android Studio)
 dist/             – build output (not in git):
-  Fokkus-Setup-1.1.0.exe – Windows installer
+  Fokkus-Setup-1.2.0.exe – Windows installer
   Fokkus.exe             – Windows app, portable (no install)
   Fokkus.apk             – Android app (sideload)
 ```
@@ -27,11 +27,12 @@ dist/             – build output (not in git):
 | **Statistics**: day / week / month / year charts, stacked by subject, with plan markers | hover for details | tap for details |
 | Totals, pomodoros vs plan, daily average, streak, time per subject | ✅ | ✅ |
 | **Strict mode** (no pause/skip/stop/quit during focus, lists only get stricter) | ✅ | ✅ |
-| Website filter: *allow only my list* (default) or *block my list* | all major browsers | Chrome, Edge, Brave, Firefox, Samsung, Opera, DuckDuckGo, Vivaldi |
-| **Categories you switch on/off with one button**: TUM, AI, Google Docs, Notes, M365, PDF, Reference, **GitHub & coding** (GitHub sign-in, VS Code, Copilot, pip/npm…), Essentials | ✅ websites + apps | ✅ websites |
-| **On/off switch on every list entry** (turn a site or app off without deleting it) | ✅ | ✅ |
-| **Quick buttons on the Timer page**: Website filter ON/OFF, App blocking ON/OFF (e.g. for a programming session) | ✅ also in the tray menu | ✅ |
-| App blocking | closes listed programs | locks everything except allowed apps |
+| **Four separate on/off functions**: Allowed websites, Blocked websites, Allowed apps, Blocked apps (see below) | ✅ | ✅ |
+| Website filtering | all major browsers | Chrome, Edge, Brave, Firefox, Samsung, Opera, DuckDuckGo, Vivaldi |
+| Allowed apps | other windows are minimized (never closed) | everything else is locked |
+| Blocked apps | closed | locked |
+| **Quick add categories**: TUM, AI, Google Docs, Notes, M365, PDF, Reference, **GitHub & coding** (GitHub sign-in, VS Code, Copilot, pip/npm…), Essentials; Social, Video, Chat, Games… | ✅ websites + apps | ✅ websites + blocked apps |
+| **Quick switches on the Timer page** for all four functions (e.g. only *Blocked websites* for a programming session) | ✅ also in the tray menu | ✅ |
 | Wellbeing tips (water, neck, eyes, posture, breathing) + break ideas | pop-up | notification + bubble |
 | Small timer | tray icon + floating mini timer | countdown notification and/or floating bubble |
 
@@ -42,11 +43,23 @@ dist/             – build output (not in git):
 
 Subject colors come from a color-blind-checked palette and stay fixed per subject, so they never change between screens.
 
+### Allowed / blocked: four switches
+Websites and apps each have two lists, and each list has its own switch. They only apply during focus; breaks are always free.
+
+| Allowed | Blocked | During focus |
+|---|---|---|
+| ON | OFF | only what's on the allowed list works |
+| OFF | ON | everything works except what's on the blocked list |
+| ON | ON | only allowed things work, and blocked ones never do, even if they're on both lists |
+| OFF | OFF | nothing is filtered |
+
+Example: for a programming session where you only want to keep YouTube & co. away, switch **Blocked websites** on and **Allowed websites** off. In strict mode a switch can be turned on during focus, but not off.
+
 ---
 
 ## Windows
 
-**Install:** run `Fokkus-Setup-1.1.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
+**Install:** run `Fokkus-Setup-1.2.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
 - a desktop shortcut and a Start menu entry
 - an entry in *Settings → Apps*, from where you can uninstall. The uninstaller asks whether to keep your plan and statistics.
 
@@ -75,7 +88,7 @@ Fokkus.exe --restore-internet
 ```bash
 winget install JRSoftware.InnoSetup
 ```
-`Fokkus.exe --selftest out.txt` runs 30 built-in tests (filter rules, the live proxy, plan and statistics math).
+`Fokkus.exe --selftest out.txt` runs 45 built-in tests (all four filter combinations, the live proxy, plan and statistics math).
 
 Data lives in `%APPDATA%\Fokkus\`:
 - `settings.json`
@@ -99,7 +112,7 @@ Your settings from the old kk-Lock-in folder are carried over automatically.
 - **Timer**: ring, subject chips, motivation line, today's plan.
 - **Plan**: the weekly table, one card per subject.
 - **Stats**: charts and the per-subject breakdown.
-- **Blocking**: Apps (tick what may be used during focus) and Websites.
+- **Blocking**: Apps and Websites, each with *Allowed* and *Blocked* switches and lists.
 - **Settings**: durations, strict mode, timer display (notification / floating / both), tips.
 
 ### Build
@@ -112,4 +125,4 @@ Built with AGP 9.4, Kotlin 2.4 and Compose BOM 2026.09. compileSdk 37, minSdk 26
 ---
 
 ## Honest limits
-Fokkus is a focus tool, not parental control. You could get around it on purpose: turn off the accessibility service, kill the app, or edit the proxy setting. Strict mode removes the easy escape routes. On Windows in "allow only" mode, other programs that use the system proxy are also filtered during focus.
+Fokkus is a focus tool, not parental control. You could get around it on purpose: turn off the accessibility service, kill the app, or edit the proxy setting. Strict mode removes the easy escape routes. On Windows, while *Allowed websites* is on, other programs that use the system proxy are also filtered during focus.

@@ -92,7 +92,7 @@ class BlockerService : AccessibilityService() {
 
     private fun checkBrowser(pkg: String, force: Boolean) {
         val s = SettingsStore.current
-        if (!TimerEngine.current.lockedIn || !s.webFilter) return
+        if (!TimerEngine.current.lockedIn || !s.anySiteFilter) return
         val now = SystemClock.elapsedRealtime()
         if (!force && now - (lastUrlCheck[pkg] ?: 0L) < 700) return
         lastUrlCheck[pkg] = now
