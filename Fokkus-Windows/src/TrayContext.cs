@@ -82,8 +82,8 @@ namespace Fokkus
             clock.Tick += (s, e) => OnClock();
             clock.Start();
 
-            SystemEvents.SessionEnding += OnSessionEnding;
             if (Headless) return;
+            SystemEvents.SessionEnding += OnSessionEnding;
             ApplyAutostart();
 
             var t = new Thread(() =>
@@ -129,6 +129,15 @@ namespace Fokkus
         void StrictNotice()
         {
             Notify("\U0001F512", "Strict mode is on", "No escape until this focus session ends — " + Theme.FormatTime(Engine.Remaining) + " to go. You've got this.", Theme.Focus, 6, null, null);
+        }
+
+        // Website filter / app blocking on or off (also mid-session; turning off is refused in strict mode).
+        public void SetBlocking(bool websites, bool on)
+        {
+            if (!on && StrictLocked) { StrictNotice(); return; }
+            if (websites) Settings.BlockWebsites = on;
+            else Settings.BlockApps = on;
+            SettingsChanged();
         }
 
         public void SettingsChanged()
@@ -186,7 +195,7 @@ namespace Fokkus
             if (StrictLocked) { StrictNotice(); return; }
             IsExiting = true;
             clock.Stop();
-            try { SystemProxy.Disengage(); } catch (Exception ex) { Log.Error(ex); }
+            if (!Headless) try { SystemProxy.Disengage(); } catch (Exception ex) { Log.Error(ex); }
             AppBlocker.Update(false, new string[0]);
             Proxy.Stop();
             SystemEvents.SessionEnding -= OnSessionEnding;
@@ -333,7 +342,7 @@ namespace Fokkus
                 else SystemProxy.Disengage();
             }
             catch (Exception ex) { Log.Error(ex); }
-            AppBlocker.Update(locked && Settings.BlockApps, Settings.BlockedApps);
+            AppBlocker.Update(locked && Settings.BlockApps, Settings.ActiveApps);
         }
 
         void OnSiteBlocked(string host)
@@ -520,6 +529,8 @@ namespace Fokkus
             }
             Settings.ActiveSubjectId = Settings.Subjects[1].Id;
             Settings.PlanSince = DateTime.Today.AddDays(-56).ToString("yyyy-MM-dd");
+            if (!AppSettings.Has(Settings.DisabledAllowedSites, "arxiv.org")) Settings.DisabledAllowedSites.Add("arxiv.org");
+            if (!AppSettings.Has(Settings.DisabledApps, "Battle.net")) Settings.DisabledApps.Add("Battle.net");
             var rnd = new Random(7);
             for (int back = 56; back >= 0; back--)
             {
@@ -575,7 +586,9 @@ namespace Fokkus
             var open = new ToolStripMenuItem("Open Fokkus", null, (s, e) => ShowMain());
             open.Font = Theme.FB(9.5f);
             var quit = new ToolStripMenuItem("Quit", null, (s, e) => Exit());
-            m.Items.AddRange(new ToolStripItem[] { status, new ToolStripSeparator(), toggle, skip, stop, new ToolStripSeparator(), miniItem, tip, open, new ToolStripSeparator(), quit });
+            var webItem = new ToolStripMenuItem("Website filter", null, (s, e) => SetBlocking(true, !Settings.BlockWebsites));
+            var appsItem = new ToolStripMenuItem("App blocking", null, (s, e) => SetBlocking(false, !Settings.BlockApps));
+            m.Items.AddRange(new ToolStripItem[] { status, new ToolStripSeparator(), toggle, skip, stop, new ToolStripSeparator(), webItem, appsItem, new ToolStripSeparator(), miniItem, tip, open, new ToolStripSeparator(), quit });
             m.Opening += (s, e) =>
             {
                 var st = Engine.State;
@@ -585,6 +598,8 @@ namespace Fokkus
                 skip.Enabled = st != RunState.Idle && !StrictLocked;
                 stop.Enabled = st != RunState.Idle && !StrictLocked;
                 miniItem.Checked = mini.Visible;
+                webItem.Checked = Settings.BlockWebsites;
+                appsItem.Checked = Settings.BlockApps;
                 quit.Enabled = !StrictLocked;
                 quit.Text = StrictLocked ? "Quit (locked until focus ends)" : "Quit";
             };

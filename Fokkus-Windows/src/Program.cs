@@ -38,6 +38,25 @@ namespace Fokkus
                 }
             }
 
+            if (args.Length >= 2 && args[0] == "--screenshots")
+            {
+                // Renders every screen to PNGs. Runs alongside a live Fokkus and never touches
+                // the proxy, running apps or the settings file.
+                try { Native.SetProcessDPIAware(); } catch { }
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                using (var g = Graphics.FromHwnd(IntPtr.Zero)) Theme.Scale = g.DpiX / 96f;
+                TrayContext.Headless = true;
+                AppSettings.ReadOnly = true;
+                using (var unused = new EventWaitHandle(false, EventResetMode.AutoReset))
+                {
+                    var shots = new TrayContext(true, unused);
+                    shots.CaptureScreens(args[1]);
+                    shots.Exit();
+                }
+                return 0;
+            }
+
             try { Native.SetProcessDPIAware(); } catch { }
 
             bool created;
@@ -61,15 +80,6 @@ namespace Fokkus
                 Log.Error(e.ExceptionObject as Exception);
             };
             AppDomain.CurrentDomain.ProcessExit += (s, e) => { try { SystemProxy.Disengage(); } catch { } };
-
-            if (args.Length >= 2 && args[0] == "--screenshots")
-            {
-                TrayContext.Headless = true;
-                var ctx = new TrayContext(true, showEvent);
-                ctx.CaptureScreens(args[1]);
-                ctx.Exit();
-                return 0;
-            }
 
             SystemProxy.RecoverAll();
             try

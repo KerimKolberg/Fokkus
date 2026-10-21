@@ -21,7 +21,7 @@ namespace Fokkus
 
         public static HostRules From(AppSettings s)
         {
-            return new HostRules(s.AllowListMode, s.AllowListMode ? s.AllowedSites : s.BlockedSites);
+            return new HostRules(s.AllowListMode, s.ActiveSites(s.AllowListMode));
         }
 
         public int Count { get { return rules.Length; } }

@@ -23,7 +23,7 @@ object Domains {
     }
 
     fun siteAllowed(host: String, s: AppSettings): Boolean =
-        if (s.webAllowMode) matches(host, s.allowedSites) else !matches(host, s.blockedSites)
+        if (s.webAllowMode) matches(host, s.activeAllowedSites) else !matches(host, s.activeBlockedSites)
 
     /** Reads the host out of what a browser shows in its address bar ("moodle.tum.de/course/..."). */
     fun hostFromAddressBar(raw: String): String? {

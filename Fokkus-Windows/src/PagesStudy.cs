@@ -41,6 +41,7 @@ namespace Fokkus
         readonly MotivationCard motto;
         readonly SubjectButton subject;
         readonly TodayPlanView plan;
+        readonly QuickToggle qWeb, qApps;
         string lastKey;
 
         public TimerPage(TrayContext ctx, Size size) : base(ctx, size)
@@ -60,6 +61,12 @@ namespace Fokkus
             btnStop = Button("Stop", Glyph.Stop, x + wMain + 2 * gap + wSec, by, wSec, S(48), (s, e) => Ctx.Stop());
             lblState = AddLabel("", Theme.FB(9.5f), Theme.Focus, Pad, by + S(60), leftW, S(42), ContentAlignment.TopCenter);
             lblInfo = AddLabel("", Theme.F(9), Theme.Muted, Pad, by + S(104), leftW, S(22), ContentAlignment.MiddleCenter);
+            // Quick switches: decide per session what gets blocked (e.g. websites off for a programming session).
+            int qw = (leftW - S(12)) / 2;
+            qWeb = Place(new QuickToggle("Website filter", Glyph.Globe), Pad, by + S(136), qw, S(40));
+            qWeb.Click += (s, e) => Ctx.SetBlocking(true, !Ctx.Settings.BlockWebsites);
+            qApps = Place(new QuickToggle("App blocking", Glyph.Apps), Pad + qw + S(12), by + S(136), qw, S(40));
+            qApps.Click += (s, e) => Ctx.SetBlocking(false, !Ctx.Settings.BlockApps);
 
             int rx = Pad + leftW + S(24), rw = Width - Pad - rx;
             motto = Place(new MotivationCard(), rx, S(96), rw, S(136));
@@ -134,7 +141,8 @@ namespace Fokkus
             {
                 var parts = new List<string>();
                 if (s.BlockWebsites) parts.Add(s.AllowListMode ? "only allowed websites" : "distracting sites blocked");
-                if (s.BlockApps && s.BlockedApps.Count > 0) parts.Add(s.BlockedApps.Count + " apps blocked");
+                int apps = s.ActiveApps.Count();
+                if (s.BlockApps && apps > 0) parts.Add(apps + " apps blocked");
                 lblState.Text = "\U0001F512  LOCKED IN" + (Ctx.StrictLocked ? " · STRICT" : "") + (parts.Count > 0 ? "\n" + string.Join(", ", parts) : "");
                 lblState.ForeColor = Theme.Focus;
             }
@@ -156,6 +164,8 @@ namespace Fokkus
             planTitle.Text = "TODAY'S PLAN" + (target > 0 ? "  ·  " + done + " / " + target : "");
             subject.Subject = Planner.Active(s);
             subject.Invalidate();
+            qWeb.SetChecked(s.BlockWebsites);
+            qApps.SetChecked(s.BlockApps);
             plan.SetRows(Planner.Today(s, Ctx.Sessions), s.ActiveSubjectId);
             lastKey = null;
             OnTick();

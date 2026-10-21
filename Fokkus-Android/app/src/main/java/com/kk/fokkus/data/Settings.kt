@@ -38,8 +38,27 @@ data class AppSettings(
     val activeSubjectId: String? = null,
     val autoNextSubject: Boolean = true,
     val planSince: String? = null, // yyyy-MM-dd: plan targets count from this day on
+    // sites that stay in a list but are switched off
+    val disabledAllowedSites: Set<String> = emptySet(),
+    val disabledBlockedSites: Set<String> = emptySet(),
+    val settingsVersion: Int = CURRENT_VERSION,
 ) {
     val currentSites: List<String> get() = if (webAllowMode) allowedSites else blockedSites
+    val currentDisabled: Set<String> get() = if (webAllowMode) disabledAllowedSites else disabledBlockedSites
+    val activeAllowedSites: List<String> get() = allowedSites.filter { it !in disabledAllowedSites }
+    val activeBlockedSites: List<String> get() = blockedSites.filter { it !in disabledBlockedSites }
+
+    /** Copy with the current list / its switched-off entries replaced. */
+    fun withCurrent(list: List<String>, off: Set<String>): AppSettings {
+        val clean = list.distinct().sorted()
+        val o = off.filter { it in clean }.toSet()
+        return if (webAllowMode) copy(allowedSites = clean, disabledAllowedSites = o) else copy(blockedSites = clean, disabledBlockedSites = o)
+    }
+
+    companion object {
+        /** Bumped when defaults change, so saved settings get the new defaults once. */
+        const val CURRENT_VERSION = 2
+    }
     val planStart: LocalDate get() = planSince?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.MAX
 }
 
@@ -63,7 +82,15 @@ object SettingsStore {
 
     private fun load(): AppSettings {
         val json = prefs.getString("json", null) ?: return AppSettings()
-        return try { fromJson(JSONObject(json)) } catch (e: Exception) { AppSettings() }
+        val s = try { fromJson(JSONObject(json)) } catch (e: Exception) { return AppSettings() }
+        if (s.settingsVersion >= AppSettings.CURRENT_VERSION) return s
+        // v2: GitHub & coding sites (GitHub sign-in, VS Code / github.dev, registries) are allowed by default.
+        val upgraded = s.copy(
+            allowedSites = (s.allowedSites + Presets.codingSites).distinct().sorted(),
+            settingsVersion = AppSettings.CURRENT_VERSION,
+        )
+        prefs.edit().putString("json", toJson(upgraded).toString()).apply()
+        return upgraded
     }
 
     private fun toJson(s: AppSettings) = JSONObject().apply {
@@ -80,6 +107,9 @@ object SettingsStore {
                 put(JSONObject().put("id", sub.id).put("name", sub.name).put("color", sub.colorIndex).put("targets", JSONArray(sub.targets)))
             }
         })
+        put("disabledAllowedSites", JSONArray(s.disabledAllowedSites.toList()))
+        put("disabledBlockedSites", JSONArray(s.disabledBlockedSites.toList()))
+        put("settingsVersion", s.settingsVersion)
         put("activeSubjectId", s.activeSubjectId ?: JSONObject.NULL)
         put("autoNextSubject", s.autoNextSubject)
         put("planSince", s.planSince ?: JSONObject.NULL)
@@ -129,6 +159,9 @@ object SettingsStore {
             activeSubjectId = if (o.isNull("activeSubjectId")) null else o.optString("activeSubjectId").ifEmpty { null },
             autoNextSubject = o.optBoolean("autoNextSubject", true),
             planSince = if (o.isNull("planSince")) null else o.optString("planSince").ifEmpty { null },
+            disabledAllowedSites = o.strings("disabledAllowedSites", emptyList()).toSet(),
+            disabledBlockedSites = o.strings("disabledBlockedSites", emptyList()).toSet(),
+            settingsVersion = o.optInt("settingsVersion", 1),
         )
     }
 }

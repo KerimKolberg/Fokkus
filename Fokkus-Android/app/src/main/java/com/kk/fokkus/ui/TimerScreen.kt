@@ -192,6 +192,18 @@ fun TimerScreen(resumeTick: Int, requestNotifications: () -> Unit, onOpenPlan: (
             textAlign = TextAlign.Center, fontWeight = if (st.lockedIn) FontWeight.SemiBold else FontWeight.Normal,
         )
 
+        // Quick switches: decide per session what gets locked (e.g. websites off for a programming session).
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            QuickToggle("Website filter", R.drawable.ic_globe, s.webFilter, enabled = !(strict && s.webFilter), modifier = Modifier.weight(1f)) { v ->
+                SettingsStore.update { it.copy(webFilter = v) }
+                TimerEngine.settingsChanged()
+            }
+            QuickToggle("App lock", R.drawable.ic_apps, s.blockApps, enabled = !(strict && s.blockApps), modifier = Modifier.weight(1f)) { v ->
+                SettingsStore.update { it.copy(blockApps = v) }
+                TimerEngine.settingsChanged()
+            }
+        }
+
         Spacer(Modifier.height(16.dp))
         TodayPlanCard(planRows, active, done, target, onSelect = select, onOpenPlan = onOpenPlan)
 

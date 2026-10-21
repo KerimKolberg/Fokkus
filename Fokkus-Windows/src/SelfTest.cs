@@ -38,6 +38,20 @@ namespace Fokkus
             check("distraction detection", Presets.IsKnownDistraction("www.instagram.com") && !Presets.IsKnownDistraction("moodle.tum.de"));
             check("bypass list", allow.BuildBypassList().Contains(";tum.de;*.tum.de") && allow.BuildBypassList().Contains(SystemProxy.Signature));
 
+            // On/off switches + categories
+            var sw = new AppSettings();
+            check("GitHub & coding allowed by default", HostRules.From(sw).IsAllowed("github.githubassets.com") && HostRules.From(sw).IsAllowed("marketplace.visualstudio.com"));
+            sw.DisabledAllowedSites.Add("github.com");
+            check("switched-off site is blocked", !HostRules.From(sw).IsAllowed("github.com") && HostRules.From(sw).IsAllowed("moodle.tum.de"));
+            var coding = Presets.AllowSites.First(p => p.Name == Presets.CodingPreset);
+            check("category off while an entry is off", !Categories.IsOn(coding, sw.AllowedSites, sw.DisabledAllowedSites));
+            Categories.Toggle(coding, Presets.AllowSites, sw.AllowedSites, sw.DisabledAllowedSites);
+            check("category on switches entries back on", Categories.IsOn(coding, sw.AllowedSites, sw.DisabledAllowedSites) && HostRules.From(sw).IsAllowed("github.com"));
+            Categories.Toggle(coding, Presets.AllowSites, sw.AllowedSites, sw.DisabledAllowedSites);
+            check("category off keeps entries but blocks them", AppSettings.Has(sw.AllowedSites, "vscode.dev") && !HostRules.From(sw).IsAllowed("vscode.dev"));
+            sw.DisabledApps.Add("Discord");
+            check("switched-off app is not closed", !sw.ActiveApps.Contains("Discord") && sw.ActiveApps.Contains("steam"));
+
             // Study plan + statistics
             check("weekday index", Planner.DayIndex(new DateTime(2026, 10, 5)) == 0 && Planner.DayIndex(new DateTime(2026, 10, 4)) == 6);
             var st = new AppSettings();

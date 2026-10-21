@@ -6,7 +6,7 @@ A Pomodoro study app for **Windows** and **Android**. Plan your week per subject
 Fokkus-Windows/   – C# source, build.cmd, installer/ (Inno Setup script)
 Fokkus-Android/   – Kotlin / Jetpack Compose project (open in Android Studio)
 dist/             – build output (not in git):
-  Fokkus-Setup-1.0.0.exe – Windows installer
+  Fokkus-Setup-1.1.0.exe – Windows installer
   Fokkus.exe             – Windows app, portable (no install)
   Fokkus.apk             – Android app (sideload)
 ```
@@ -27,7 +27,10 @@ dist/             – build output (not in git):
 | **Statistics**: day / week / month / year charts, stacked by subject, with plan markers | hover for details | tap for details |
 | Totals, pomodoros vs plan, daily average, streak, time per subject | ✅ | ✅ |
 | **Strict mode** (no pause/skip/stop/quit during focus, lists only get stricter) | ✅ | ✅ |
-| Website filter: *allow only my list* (default) or *block my list*, with presets (TUM, AI, Google Docs, Notes, M365, PDF, Reference, Coding) | all major browsers | Chrome, Edge, Brave, Firefox, Samsung, Opera, DuckDuckGo, Vivaldi |
+| Website filter: *allow only my list* (default) or *block my list* | all major browsers | Chrome, Edge, Brave, Firefox, Samsung, Opera, DuckDuckGo, Vivaldi |
+| **Categories you switch on/off with one button**: TUM, AI, Google Docs, Notes, M365, PDF, Reference, **GitHub & coding** (GitHub sign-in, VS Code, Copilot, pip/npm…), Essentials | ✅ websites + apps | ✅ websites |
+| **On/off switch on every list entry** (turn a site or app off without deleting it) | ✅ | ✅ |
+| **Quick buttons on the Timer page**: Website filter ON/OFF, App blocking ON/OFF (e.g. for a programming session) | ✅ also in the tray menu | ✅ |
 | App blocking | closes listed programs | locks everything except allowed apps |
 | Wellbeing tips (water, neck, eyes, posture, breathing) + break ideas | pop-up | notification + bubble |
 | Small timer | tray icon + floating mini timer | countdown notification and/or floating bubble |
@@ -43,7 +46,7 @@ Subject colors come from a color-blind-checked palette and stay fixed per subjec
 
 ## Windows
 
-**Install:** run `Fokkus-Setup-1.0.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
+**Install:** run `Fokkus-Setup-1.1.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
 - a desktop shortcut and a Start menu entry
 - an entry in *Settings → Apps*, from where you can uninstall. The uninstaller asks whether to keep your plan and statistics.
 

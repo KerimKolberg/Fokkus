@@ -376,6 +376,92 @@ namespace Fokkus
         }
     }
 
+    // List whose rows each have an on/off switch on the right (click the switch to toggle).
+    class SwitchList : DarkList
+    {
+        public Func<object, bool> IsOn = o => true;
+        public event Action<object> Toggled;
+
+        static int SwitchW { get { return Theme.S(36); } }
+
+        Rectangle SwitchRect(Rectangle row)
+        {
+            int h = Theme.S(20);
+            return new Rectangle(row.Right - SwitchW - Theme.S(14), row.Y + (row.Height - h) / 2, SwitchW, h);
+        }
+
+        protected override void OnDrawItem(DrawItemEventArgs e)
+        {
+            var g = e.Graphics;
+            if (e.Index < 0 || e.Index >= Items.Count)
+            {
+                using (var bb = new SolidBrush(BackColor)) g.FillRectangle(bb, e.Bounds);
+                return;
+            }
+            bool sel = (e.State & DrawItemState.Selected) != 0;
+            using (var b = new SolidBrush(sel ? Theme.Hover : BackColor)) g.FillRectangle(b, e.Bounds);
+            if (sel) using (var a = new SolidBrush(Theme.Focus)) g.FillRectangle(a, e.Bounds.X, e.Bounds.Y + Theme.S(6), Theme.S(3), e.Bounds.Height - Theme.S(12));
+            object item = Items[e.Index];
+            bool on = IsOn(item);
+            var sw = SwitchRect(e.Bounds);
+            Theme.DrawText(g, GetItemText(item), Font, on ? Theme.Text : Theme.Muted,
+                new Rectangle(e.Bounds.X + Theme.S(14), e.Bounds.Y, sw.Left - e.Bounds.X - Theme.S(22), e.Bounds.Height), Theme.Left);
+            var old = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Theme.FillRound(g, on ? Theme.Focus : Theme.Blend(Theme.Surface, Theme.Bg, 0.3f), sw, sw.Height / 2f);
+            float k = sw.Height - Theme.S(6);
+            using (var kb = new SolidBrush(on ? Color.White : Theme.Muted))
+                g.FillEllipse(kb, on ? sw.Right - k - Theme.S(3) : sw.Left + Theme.S(3), sw.Top + Theme.S(3), k, k);
+            g.SmoothingMode = old;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            int i = IndexFromPoint(e.Location);
+            if (e.Button == MouseButtons.Left && i >= 0 && i < Items.Count && e.X >= Width - SwitchW - Theme.S(26) && Toggled != null)
+                Toggled(Items[i]);
+            base.OnMouseDown(e);
+        }
+    }
+
+    // Big on/off button (Timer page): icon, label and an ON/OFF pill.
+    class QuickToggle : PaintedControl
+    {
+        public string Glyph;
+        public bool Checked;
+        bool hover;
+
+        public QuickToggle(string text, string glyph)
+        {
+            Text = text;
+            Glyph = glyph;
+            Font = Theme.F(9.5f);
+            Cursor = Cursors.Hand;
+        }
+
+        public void SetChecked(bool on) { if (Checked != on) { Checked = on; Invalidate(); } }
+
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Color back = ParentBack;
+            g.Clear(back);
+            Theme.FillRound(g, hover && Enabled ? Theme.Surface2 : Theme.Surface, new RectangleF(0, 0, Width - 1, Height - 1), Theme.S(10));
+            Color ic = !Enabled ? Theme.Blend(Theme.Muted, back, 0.4f) : Checked ? Theme.Focus : Theme.Muted;
+            Theme.DrawText(g, Glyph ?? "", Theme.Icons(10), ic, new Rectangle(Theme.S(12), 0, Theme.S(20), Height), Theme.Center);
+            int pillW = Theme.S(40), pillH = Theme.S(20);
+            var pill = new RectangleF(Width - pillW - Theme.S(10), (Height - pillH) / 2f, pillW, pillH);
+            Theme.FillRound(g, Checked ? Theme.Focus : Theme.Surface2, pill, pillH / 2f);
+            Theme.DrawText(g, Checked ? "ON" : "OFF", Theme.FB(8), Checked ? Theme.OnColor(Theme.Focus) : Theme.Muted, Rectangle.Round(pill), Theme.Center);
+            Theme.DrawText(g, Text, Font, Enabled ? Theme.Text : Theme.Muted,
+                new Rectangle(Theme.S(38), 0, (int)pill.Left - Theme.S(44), Height), Theme.Left);
+        }
+    }
+
     class TextInput : Panel
     {
         public readonly TextBox Box;

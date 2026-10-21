@@ -3,6 +3,8 @@ package com.kk.fokkus.data
 class Preset(val name: String, val items: List<String>)
 
 object Presets {
+    const val CODING = "GitHub & coding"
+
     /** Sites you typically NEED while studying ("allow only my list" mode). */
     val allowSites = listOf(
         Preset("TUM", listOf("tum.de", "mytum.de", "tum.live", "lrz.de")),
@@ -16,8 +18,12 @@ object Presets {
         Preset("PDF tools", listOf("ilovepdf.com", "smallpdf.com", "pdf24.org", "sejda.com", "adobe.com", "adobelogin.com", "adobe.io")),
         Preset("Reference", listOf("wikipedia.org", "wikimedia.org", "wolframalpha.com", "desmos.com", "geogebra.org", "arxiv.org",
             "leo.org", "dict.cc", "stackoverflow.com", "stackexchange.com")),
-        Preset("Coding", listOf("github.com", "githubusercontent.com", "githubassets.com", "gitlab.com", "python.org",
-            "developer.mozilla.org", "w3schools.com", "cppreference.com", "readthedocs.io", "pypi.org")),
+        // GitHub sign-in (incl. its page assets), VS Code / github.dev, package registries and docs.
+        Preset(CODING, listOf("github.com", "githubusercontent.com", "githubassets.com", "github.dev", "githubcopilot.com",
+            "gitlab.com", "visualstudio.com", "vscode.dev", "vscode-cdn.net", "vsassets.io", "vscode-unpkg.net", "vo.msecnd.net",
+            "vscode-sync.trafficmanager.net", "exp-tas.com", "python.org", "pythonhosted.org", "pypi.org", "npmjs.com", "npmjs.org",
+            "yarnpkg.com", "nuget.org", "maven.org", "gradle.org", "jetbrains.com", "developer.mozilla.org", "w3schools.com",
+            "cppreference.com", "readthedocs.io")),
         Preset("Essentials", listOf("cloudflare.com", "jsdelivr.net", "unpkg.com", "recaptcha.net", "hcaptcha.com")),
     )
 
@@ -36,7 +42,21 @@ object Presets {
     )
 
     val defaultAllowedSites: List<String> = collect(allowSites,
-        "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", "Essentials")
+        "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", CODING, "Essentials")
+
+    val codingSites: List<String> get() = allowSites.first { it.name == CODING }.items
+
+    /** A category is ON when all of its sites are in the list and switched on. */
+    fun isOn(p: Preset, list: List<String>, off: Set<String>) = p.items.all { it in list && it !in off }
+
+    /** ON -> switch its sites off (except ones another active category needs). OFF -> add / switch them on. */
+    fun toggle(p: Preset, all: List<Preset>, list: List<String>, off: Set<String>): Pair<List<String>, Set<String>> =
+        if (isOn(p, list, off)) {
+            val keep = all.filter { it != p && isOn(it, list, off) }.flatMap { it.items }.toSet()
+            list to (off + p.items.filter { it !in keep })
+        } else {
+            (list + p.items).distinct().sorted() to (off - p.items.toSet())
+        }
     val defaultBlockedSites: List<String> = collect(blockSites, "Social", "Video", "Chat", "Shopping")
 
     private fun collect(presets: List<Preset>, vararg names: String) =
@@ -62,7 +82,7 @@ object Presets {
         "com.microsoft.office.officehubrow", "com.microsoft.office.word", "com.microsoft.office.excel",
         "com.microsoft.office.powerpoint", "com.microsoft.teams", "com.microsoft.skydrive", "com.ichi2.anki",
         "com.quizlet.quizletandroid", "com.wolfram.android.alpha", "org.geogebra.android", "org.geogebra.android.calculator.suite",
-        // 2-factor login
-        "com.google.android.apps.authenticator2", "com.azure.authenticator",
+        // 2-factor login, coding
+        "com.google.android.apps.authenticator2", "com.azure.authenticator", "com.github.android",
     )
 }

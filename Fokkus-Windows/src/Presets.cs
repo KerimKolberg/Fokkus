@@ -27,12 +27,19 @@ namespace Fokkus
             new Preset("PDF tools", "ilovepdf.com", "smallpdf.com", "pdf24.org", "sejda.com", "adobe.com", "adobelogin.com", "adobe.io"),
             new Preset("Reference", "wikipedia.org", "wikimedia.org", "wolframalpha.com", "desmos.com", "geogebra.org", "arxiv.org",
                        "leo.org", "dict.cc", "stackoverflow.com", "stackexchange.com"),
-            new Preset("Coding", "github.com", "githubusercontent.com", "githubassets.com", "gitlab.com", "python.org",
-                       "developer.mozilla.org", "w3schools.com", "cppreference.com", "readthedocs.io", "pypi.org"),
+            // Everything GitHub sign-in (incl. its page assets) and VS Code (marketplace, sign-in, sync, Copilot) talk to,
+            // plus the common package registries and docs.
+            new Preset(CodingPreset, "github.com", "githubusercontent.com", "githubassets.com", "github.dev", "githubcopilot.com",
+                       "gitlab.com", "visualstudio.com", "vscode.dev", "vscode-cdn.net", "vsassets.io", "vscode-unpkg.net",
+                       "vo.msecnd.net", "vscode-sync.trafficmanager.net", "exp-tas.com", "python.org", "pythonhosted.org", "pypi.org",
+                       "npmjs.com", "npmjs.org", "yarnpkg.com", "nuget.org", "maven.org", "gradle.org", "jetbrains.com",
+                       "developer.mozilla.org", "w3schools.com", "cppreference.com", "readthedocs.io"),
             new Preset("Essentials", "cloudflare.com", "jsdelivr.net", "unpkg.com", "recaptcha.net", "hcaptcha.com", "msftconnecttest.com"),
         };
 
-        public static readonly string[] DefaultAllowPresets = { "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", "Essentials" };
+        public const string CodingPreset = "GitHub & coding";
+
+        public static readonly string[] DefaultAllowPresets = { "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", CodingPreset, "Essentials" };
 
         // Typical distractions (used in "block my list" mode, and to recognise distractions in allow mode).
         public static readonly Preset[] BlockSites =

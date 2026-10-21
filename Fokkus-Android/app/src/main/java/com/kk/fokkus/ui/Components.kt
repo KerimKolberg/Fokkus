@@ -79,6 +79,27 @@ fun TimerRing(
     }
 }
 
+/** Big on/off button: icon, label and an ON/OFF pill. */
+@Composable
+fun QuickToggle(label: String, icon: Int, checked: Boolean, enabled: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(Palette.Surface)
+            .clickable(enabled = enabled) { onChange(!checked) }
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconRes(icon, if (checked) Palette.Focus else Palette.Muted, 20.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(label, color = if (enabled) Palette.Text else Palette.Muted, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1)
+        Box(
+            Modifier.clip(RoundedCornerShape(10.dp)).background(if (checked) Palette.Focus else Palette.Surface2)
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        ) {
+            Text(if (checked) "ON" else "OFF", color = if (checked) Palette.OnAccent else Palette.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(
