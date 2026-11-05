@@ -4,6 +4,11 @@ class Preset(val name: String, val items: List<String>)
 
 object Presets {
     const val CODING = "GitHub & coding"
+    const val YOUTUBE = "YouTube (music)"
+
+    // Declared first: the lists below use them (properties initialize in source order).
+    val youTubeHosts = listOf("youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "ggpht.com", "youtube-nocookie.com")
+    val youTubeApps = setOf("com.google.android.youtube", "com.google.android.apps.youtube.music")
 
     /** Sites you typically NEED while studying (the "Allowed websites" list). */
     val allowSites = listOf(
@@ -24,6 +29,8 @@ object Presets {
             "vscode-sync.trafficmanager.net", "exp-tas.com", "python.org", "pythonhosted.org", "pypi.org", "npmjs.com", "npmjs.org",
             "yarnpkg.com", "nuget.org", "maven.org", "gradle.org", "jetbrains.com", "developer.mozilla.org", "w3schools.com",
             "cppreference.com", "readthedocs.io")),
+        // Study music (lofi etc.): YouTube, its video servers and the bits its player needs.
+        Preset(YOUTUBE, youTubeHosts + listOf("youtubei.googleapis.com", "gstatic.com")),
         Preset("Essentials", listOf("cloudflare.com", "jsdelivr.net", "unpkg.com", "recaptcha.net", "hcaptcha.com")),
     )
 
@@ -32,8 +39,8 @@ object Presets {
         Preset("Social", listOf("instagram.com", "cdninstagram.com", "facebook.com", "fbcdn.net", "messenger.com", "tiktok.com",
             "x.com", "twitter.com", "reddit.com", "redd.it", "snapchat.com", "pinterest.com", "tumblr.com", "threads.net",
             "threads.com", "bsky.app", "9gag.com")),
-        Preset("Video", listOf("youtube.com", "youtu.be", "netflix.com", "twitch.tv", "primevideo.com", "disneyplus.com",
-            "joyn.de", "crunchyroll.com")),
+        Preset("Video", listOf("netflix.com", "twitch.tv", "primevideo.com", "disneyplus.com", "joyn.de", "crunchyroll.com")),
+        Preset("YouTube", youTubeHosts), // not blocked by default: many people study with music from it
         Preset("Chat", listOf("whatsapp.com", "discord.com", "telegram.org")),
         Preset("Shopping", listOf("amazon.de", "amazon.com", "ebay.de", "ebay.com", "zalando.de", "aliexpress.com", "temu.com",
             "shein.com", "kleinanzeigen.de")),
@@ -42,9 +49,10 @@ object Presets {
     )
 
     val defaultAllowedSites: List<String> = collect(allowSites,
-        "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", CODING, "Essentials")
+        "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", CODING, YOUTUBE, "Essentials")
 
     val codingSites: List<String> get() = allowSites.first { it.name == CODING }.items
+    val youTubeSites: List<String> get() = allowSites.first { it.name == YOUTUBE }.items
 
     val defaultBlockedSites: List<String> = collect(blockSites, "Social", "Video", "Chat", "Shopping")
 
@@ -53,8 +61,9 @@ object Presets {
         Preset("Social", listOf("com.instagram.android", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.snapchat.android",
             "com.twitter.android", "com.reddit.frontpage", "com.facebook.katana", "com.facebook.orca", "com.pinterest", "com.tumblr",
             "com.instagram.barcelona", "xyz.blueskyweb.app", "com.bereal.ft", "com.ninegag.android.app")),
-        Preset("Video", listOf("com.google.android.youtube", "com.netflix.mediaclient", "tv.twitch.android.app",
-            "com.amazon.avod.thirdpartyclient", "com.disney.disneyplus", "com.crunchyroll.crunchyroid", "de.prosiebensat1digital.seventv")),
+        Preset("Video", listOf("com.netflix.mediaclient", "tv.twitch.android.app", "com.amazon.avod.thirdpartyclient",
+            "com.disney.disneyplus", "com.crunchyroll.crunchyroid", "de.prosiebensat1digital.seventv")),
+        Preset("YouTube", youTubeApps.toList()),
         Preset("Chat", listOf("com.whatsapp", "org.telegram.messenger", "com.discord", "org.thoughtcrime.securesms")),
         Preset("Games", listOf("com.supercell.clashroyale", "com.supercell.clashofclans", "com.supercell.brawlstars", "com.roblox.client",
             "com.king.candycrushsaga", "com.chess", "com.mojang.minecraftpe", "com.innersloth.spacemafia")),
@@ -89,5 +98,5 @@ object Presets {
         "com.quizlet.quizletandroid", "com.wolfram.android.alpha", "org.geogebra.android", "org.geogebra.android.calculator.suite",
         // 2-factor login, coding
         "com.google.android.apps.authenticator2", "com.azure.authenticator", "com.github.android",
-    )
+    ) + youTubeApps // study music
 }

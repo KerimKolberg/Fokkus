@@ -6,7 +6,7 @@ A Pomodoro study app for **Windows** and **Android**. Plan your week per subject
 Fokkus-Windows/   – C# source, build.cmd, installer/ (Inno Setup script)
 Fokkus-Android/   – Kotlin / Jetpack Compose project (open in Android Studio)
 dist/             – build output (not in git):
-  Fokkus-Setup-1.2.0.exe – Windows installer
+  Fokkus-Setup-1.3.0.exe – Windows installer
   Fokkus.exe             – Windows app, portable (no install)
   Fokkus.apk             – Android app (sideload)
 ```
@@ -20,6 +20,7 @@ dist/             – build output (not in git):
 | | Windows | Android |
 |---|---|---|
 | Pomodoro: focus, short break, long break every N sessions, auto-start options | ✅ | ✅ |
+| **One-click rhythms** in Settings: Pomodoro 25 (25/5, long 15 after 4), Pomodoro 45 (45/10, long 20 after 3), Ultradian 90 (90/20, long 30 after 2) | ✅ | ✅ |
 | **Weekly study plan**: pomodoros per subject per weekday | grid: click +1, right-click −1 | tap +1, long-press −1 |
 | **Subject picker** + today's plan progress beside the timer | ✅ | ✅ |
 | Auto-switch to the next subject when today's target is reached | ✅ | ✅ |
@@ -31,7 +32,7 @@ dist/             – build output (not in git):
 | Website filtering | all major browsers | Chrome, Edge, Brave, Firefox, Samsung, Opera, DuckDuckGo, Vivaldi |
 | Allowed apps | other windows are minimized (never closed) | everything else is locked |
 | Blocked apps | closed | locked |
-| **Quick add categories**: TUM, AI, Google Docs, Notes, M365, PDF, Reference, **GitHub & coding** (GitHub sign-in, VS Code, Copilot, pip/npm…), Essentials; Social, Video, Chat, Games… | ✅ websites + apps | ✅ websites + blocked apps |
+| **Quick add categories**: TUM, AI, Google Docs, Notes, M365, PDF, Reference, **GitHub & coding** (GitHub sign-in, VS Code, Copilot, pip/npm…), **YouTube (music)**, Essentials; Social, Video, YouTube, Chat, Games… YouTube is allowed by default for study music. | ✅ websites + apps | ✅ websites + blocked apps |
 | **Quick switches on the Timer page** for all four functions (e.g. only *Blocked websites* for a programming session) | ✅ also in the tray menu | ✅ |
 | Wellbeing tips (water, neck, eyes, posture, breathing) + break ideas | pop-up | notification + bubble |
 | Small timer | tray icon + floating mini timer | countdown notification and/or floating bubble |
@@ -53,13 +54,13 @@ Websites and apps each have two lists, and each list has its own switch. They on
 | ON | ON | only allowed things work, and blocked ones never do, even if they're on both lists |
 | OFF | OFF | nothing is filtered |
 
-Example: for a programming session where you only want to keep YouTube & co. away, switch **Blocked websites** on and **Allowed websites** off. In strict mode a switch can be turned on during focus, but not off.
+Example: for a programming session where you only want to keep social media & co. away, switch **Blocked websites** on and **Allowed websites** off. In strict mode a switch can be turned on during focus, but not off.
 
 ---
 
 ## Windows
 
-**Install:** run `Fokkus-Setup-1.2.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
+**Install:** run `Fokkus-Setup-1.3.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
 - a desktop shortcut and a Start menu entry
 - an entry in *Settings → Apps*, from where you can uninstall. The uninstaller asks whether to keep your plan and statistics.
 
@@ -70,7 +71,7 @@ Windows may warn about an unknown publisher the first time, because the installe
 Fokkus lives in the system tray and shows a small timer you can drag anywhere.
 
 - **Tray icon**: a ring that shrinks as time passes (teal = focus, amber = short break, violet = long break). Left-click opens Fokkus; right-click opens the menu.
-- **Mini timer**: drag to move, double-click to open, hover for ▶/⏸, skip and open. It shows the subject, and for a few seconds now and then a motivation line.
+- **Mini timer**: drag to move, double-click to open, hover for ▶/⏸, skip and open. It shows the subject, and for a few seconds now and then a motivation line. It repairs itself if it gets lost: after *Show desktop*, a virtual-desktop switch, sleep, the lock screen or a monitor change it comes back on its own.
 - **Space** starts or pauses the timer on the Timer page.
 
 ### How website blocking works
@@ -88,7 +89,7 @@ Fokkus.exe --restore-internet
 ```bash
 winget install JRSoftware.InnoSetup
 ```
-`Fokkus.exe --selftest out.txt` runs 45 built-in tests (all four filter combinations, the live proxy, plan and statistics math).
+`Fokkus.exe --selftest out.txt` runs 48 built-in tests (all four filter combinations, the live proxy, plan and statistics math).
 
 Data lives in `%APPDATA%\Fokkus\`:
 - `settings.json`

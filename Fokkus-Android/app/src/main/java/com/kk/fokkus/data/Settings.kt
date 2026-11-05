@@ -10,6 +10,21 @@ import java.time.LocalDate
 
 enum class TimerDisplay { NOTIFICATION, FLOATING, BOTH }
 
+/** Ready-made timer rhythms (shortcuts in Settings). */
+data class Rhythm(val name: String, val focus: Int, val shortBreak: Int, val longBreak: Int, val sessions: Int) {
+    fun applyTo(s: AppSettings) = s.copy(focusMin = focus, shortBreakMin = shortBreak, longBreakMin = longBreak, sessionsBeforeLong = sessions)
+    fun matches(s: AppSettings) =
+        s.focusMin == focus && s.shortBreakMin == shortBreak && s.longBreakMin == longBreak && s.sessionsBeforeLong == sessions
+
+    companion object {
+        val all = listOf(
+            Rhythm("Pomodoro 25", 25, 5, 15, 4),
+            Rhythm("Pomodoro 45", 45, 10, 20, 3),
+            Rhythm("Ultradian 90", 90, 20, 30, 2),
+        )
+    }
+}
+
 data class AppSettings(
     val focusMin: Int = 25,
     val shortBreakMin: Int = 5,
@@ -50,7 +65,7 @@ data class AppSettings(
 
     companion object {
         /** Bumped when defaults change, so saved settings get the new defaults once. */
-        const val CURRENT_VERSION = 3
+        const val CURRENT_VERSION = 4
     }
     val planStart: LocalDate get() = planSince?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.MAX
 }
@@ -80,7 +95,14 @@ object SettingsStore {
         // v2: GitHub & coding sites (GitHub sign-in, VS Code / github.dev, registries) are allowed by default.
         // v3: separate on/off functions - the old keys are converted in fromJson().
         var upgraded = s.copy(settingsVersion = AppSettings.CURRENT_VERSION)
-        if (s.settingsVersion < 2) upgraded = upgraded.copy(allowedSites = (s.allowedSites + Presets.codingSites).distinct().sorted())
+        if (s.settingsVersion < 2) upgraded = upgraded.copy(allowedSites = (upgraded.allowedSites + Presets.codingSites).distinct().sorted())
+        // v4: YouTube is for study music - off the blocked lists, onto the allowed lists.
+        if (s.settingsVersion < 4) upgraded = upgraded.copy(
+            blockedSites = upgraded.blockedSites.filterNot { site -> Presets.youTubeHosts.any { site == it || site.endsWith(".$it") } },
+            allowedSites = (upgraded.allowedSites + Presets.youTubeSites).distinct().sorted(),
+            blockedApps = upgraded.blockedApps - Presets.youTubeApps,
+            allowedApps = upgraded.allowedApps + Presets.youTubeApps,
+        )
         prefs.edit().putString("json", toJson(upgraded).toString()).apply()
         return upgraded
     }

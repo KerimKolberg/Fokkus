@@ -1,9 +1,9 @@
-; Fokkus installer (Inno Setup 6). Build with ..\build-installer.cmd
+﻿; Fokkus installer (Inno Setup 6). Build with ..\build-installer.cmd
 ; Installs per user (no admin rights needed): %LOCALAPPDATA%\Programs\Fokkus,
 ; Start menu entry, desktop shortcut, entry in Settings > Apps for uninstalling.
 
 #define AppName "Fokkus"
-#define AppVersion "1.2.0"
+#define AppVersion "1.3.0"
 #define AppExe "Fokkus.exe"
 #define AppUrl "https://github.com/KerimKolberg/Fokkus"
 
@@ -46,7 +46,7 @@ Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [CustomMessages]
 english.DeleteData=Also delete your Fokkus settings, study plan and focus statistics?%n%n(Choose No to keep them for a later reinstall.)
-german.DeleteData=Auch deine Fokkus-Einstellungen, deinen Lernplan und deine Fokus-Statistiken löschen?%n%n(Wähle Nein, um sie für eine spätere Neuinstallation zu behalten.)
+german.DeleteData=Auch deine Fokkus-Einstellungen, deinen Lernplan und deine Fokus-Statistiken lÃ¶schen?%n%n(WÃ¤hle Nein, um sie fÃ¼r eine spÃ¤tere Neuinstallation zu behalten.)
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"

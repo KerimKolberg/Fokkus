@@ -40,6 +40,7 @@ namespace Fokkus
         bool blockLogDirty;
         DateTime lastGlobalNotice = DateTime.MinValue;
         string planNote;
+        int guardTick;
 
         public bool IsExiting { get; private set; }
 
@@ -87,6 +88,10 @@ namespace Fokkus
 
             if (Headless) return;
             SystemEvents.SessionEnding += OnSessionEnding;
+            // After sleep, the lock screen or a monitor change the mini timer is shown afresh.
+            SystemEvents.DisplaySettingsChanged += OnDisplayEvent;
+            SystemEvents.PowerModeChanged += OnPowerEvent;
+            SystemEvents.SessionSwitch += OnSessionSwitch;
             ApplyAutostart();
 
             var t = new Thread(() =>
@@ -224,6 +229,9 @@ namespace Fokkus
             AppGuard.Update(false, new string[0]);
             Proxy.Stop();
             SystemEvents.SessionEnding -= OnSessionEnding;
+            SystemEvents.DisplaySettingsChanged -= OnDisplayEvent;
+            SystemEvents.PowerModeChanged -= OnPowerEvent;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
             tray.Visible = false;
             tray.Dispose();
             if (main != null && !main.IsDisposed) main.Close();
@@ -235,6 +243,30 @@ namespace Fokkus
         void OnSessionEnding(object sender, SessionEndingEventArgs e)
         {
             try { SystemProxy.Disengage(); } catch { }
+        }
+
+        void OnDisplayEvent(object sender, EventArgs e) { ReviveMiniSoon(); }
+        void OnPowerEvent(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) ReviveMiniSoon(); }
+        void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+        {
+            if (e.Reason == SessionSwitchReason.SessionUnlock || e.Reason == SessionSwitchReason.ConsoleConnect || e.Reason == SessionSwitchReason.RemoteConnect)
+                ReviveMiniSoon();
+        }
+
+        // Waits a moment for the displays to settle, then shows the mini timer afresh.
+        void ReviveMiniSoon()
+        {
+            try
+            {
+                invoker.BeginInvoke(new Action(() =>
+                {
+                    var t = new System.Windows.Forms.Timer();
+                    t.Interval = 1500;
+                    t.Tick += (s, e) => { t.Stop(); t.Dispose(); if (!IsExiting) mini.Revive(); };
+                    t.Start();
+                }));
+            }
+            catch { }
         }
 
         // ------------------------------------------------------------ engine events
@@ -335,6 +367,7 @@ namespace Fokkus
         void OnClock()
         {
             UpdateTray();
+            if (!Headless && ++guardTick % 2 == 0) mini.Guard();
             if (blockLogDirty)
             {
                 blockLogDirty = false;

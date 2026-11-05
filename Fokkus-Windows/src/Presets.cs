@@ -13,7 +13,10 @@ namespace Fokkus
 
     static class Presets
     {
-        // Sites you typically NEED while studying (used in "allow only my list" mode).
+        // Declared first: the lists below use it (static fields initialize in source order).
+        public static readonly string[] YouTubeHosts = { "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "ggpht.com", "youtube-nocookie.com" };
+
+        // Sites you typically NEED while studying (the "Allowed websites" list).
         public static readonly Preset[] AllowSites =
         {
             new Preset("TUM", "tum.de", "mytum.de", "tum.live", "lrz.de"),
@@ -34,12 +37,15 @@ namespace Fokkus
                        "vo.msecnd.net", "vscode-sync.trafficmanager.net", "exp-tas.com", "python.org", "pythonhosted.org", "pypi.org",
                        "npmjs.com", "npmjs.org", "yarnpkg.com", "nuget.org", "maven.org", "gradle.org", "jetbrains.com",
                        "developer.mozilla.org", "w3schools.com", "cppreference.com", "readthedocs.io"),
+            // Study music (lofi etc.): YouTube, its video servers and the bits its player needs.
+            new Preset(YouTubePreset, YouTubeHosts.Concat(new[] { "youtubei.googleapis.com", "gstatic.com" }).ToArray()),
             new Preset("Essentials", "cloudflare.com", "jsdelivr.net", "unpkg.com", "recaptcha.net", "hcaptcha.com", "msftconnecttest.com"),
         };
 
         public const string CodingPreset = "GitHub & coding";
+        public const string YouTubePreset = "YouTube (music)";
 
-        public static readonly string[] DefaultAllowPresets = { "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", CodingPreset, "Essentials" };
+        public static readonly string[] DefaultAllowPresets = { "TUM", "AI", "Google Drive & Docs", "Notes", "Microsoft 365", "PDF tools", "Reference", CodingPreset, YouTubePreset, "Essentials" };
 
         // Typical distractions (used in "block my list" mode, and to recognise distractions in allow mode).
         public static readonly Preset[] BlockSites =
@@ -47,8 +53,8 @@ namespace Fokkus
             new Preset("Social", "instagram.com", "cdninstagram.com", "facebook.com", "fbcdn.net", "messenger.com", "tiktok.com",
                        "tiktokcdn.com", "tiktokv.com", "x.com", "twitter.com", "twimg.com", "reddit.com", "redd.it", "redditmedia.com",
                        "redditstatic.com", "snapchat.com", "pinterest.com", "tumblr.com", "threads.net", "threads.com", "bsky.app", "9gag.com"),
-            new Preset("Video", "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "netflix.com",
-                       "nflxvideo.net", "twitch.tv", "primevideo.com", "disneyplus.com", "joyn.de", "crunchyroll.com"),
+            new Preset("Video", "netflix.com", "nflxvideo.net", "twitch.tv", "primevideo.com", "disneyplus.com", "joyn.de", "crunchyroll.com"),
+            new Preset("YouTube", YouTubeHosts),  // not blocked by default: many people study with music from it
             new Preset("Chat", "whatsapp.com", "whatsapp.net", "discord.com", "discord.gg", "discordapp.com", "telegram.org"),
             new Preset("Shopping", "amazon.de", "amazon.com", "ebay.de", "ebay.com", "zalando.de", "aliexpress.com", "temu.com",
                        "shein.com", "kleinanzeigen.de"),

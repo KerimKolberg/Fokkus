@@ -23,6 +23,9 @@ namespace Fokkus
             this.ctx = ctx;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
+            // No minimize box: "Show desktop" / Win+M would otherwise minimize it, and without a taskbar button it never comes back.
+            MinimizeBox = false;
+            MaximizeBox = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
             BackColor = Theme.Surface;
@@ -63,13 +66,52 @@ namespace Fokkus
             var s = ctx.Settings;
             var r = new Rectangle(s.MiniX, s.MiniY, Width, Height);
             bool saved = !(s.MiniX == -1 && s.MiniY == -1);
-            if (saved && Screen.AllScreens.Any(sc => sc.WorkingArea.IntersectsWith(r)))
-                Location = r.Location;
-            else
+            if (saved && MostlyOnScreen(r)) Location = r.Location;
+            else PlaceDefault();
+        }
+
+        void PlaceDefault()
+        {
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            Location = new Point(wa.Right - Width - Theme.S(20), wa.Bottom - Height - Theme.S(20));
+        }
+
+        // At least half of the timer is inside some monitor's work area.
+        static bool MostlyOnScreen(Rectangle r)
+        {
+            return Screen.AllScreens.Any(sc =>
             {
-                var wa = Screen.PrimaryScreen.WorkingArea;
-                Location = new Point(wa.Right - Width - Theme.S(20), wa.Bottom - Height - Theme.S(20));
+                var i = Rectangle.Intersect(sc.WorkingArea, r);
+                return i.Width * i.Height * 2 >= r.Width * r.Height;
+            });
+        }
+
+        // Self-repair, called every couple of seconds while the timer should be visible. It used to get lost after
+        // "Show desktop", a virtual-desktop switch, a monitor change or another window grabbing "always on top".
+        public void Guard()
+        {
+            if (!Visible || !IsHandleCreated || dragging) return;
+            try
+            {
+                if (Native.IsMinimized(Handle)) Native.RestoreNoActivate(Handle);
+                if (!MostlyOnScreen(Bounds)) PlaceDefault();
+                if (!Native.OnCurrentDesktop(Handle)) Revive();
+                else if (!Native.IsTopMost(Handle)) Native.MakeTopMost(Handle);
             }
+            catch (Exception ex) { Log.Error(ex); }
+        }
+
+        // Shows the window afresh (what untick + tick "Show mini timer" did by hand): brings it to the current
+        // virtual desktop, back on top, and repaints it after sleep, the lock screen or a display change.
+        public void Revive()
+        {
+            if (!Visible || dragging) return;
+            Hide();
+            if (!MostlyOnScreen(Bounds)) PlaceDefault();
+            Show();
+            Native.MakeTopMost(Handle);
+            lastKey = null;
+            Invalidate();
         }
 
         public void Flash(string text)

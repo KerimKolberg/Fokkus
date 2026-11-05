@@ -67,6 +67,17 @@ namespace Fokkus
             old.Upgrade();
             check("upgrade: block mode becomes blocked websites", !old.AllowSitesOn && old.BlockSitesOn && !old.BlockAppsOn && !old.AllowAppsOn);
             check("upgrade: switched-off entries removed", !AppSettings.Has(old.BlockedSites, "reddit.com") && old.DisabledBlockedSites.Count == 0 && old.SettingsVersion == AppSettings.CurrentVersion);
+            check("YouTube allowed and not blocked by default", HostRules.From(sw).IsAllowed("www.youtube.com") && HostRules.From(sw).IsAllowed("rr3---sn-4g5e6nzs.googlevideo.com") &&
+                  !sw.BlockedSites.Any(x => x.Contains("youtube")));
+            var v3 = new AppSettings();
+            v3.SettingsVersion = 3;
+            v3.AllowSitesOn = true; v3.BlockSitesOn = true;
+            v3.BlockedSites.AddRange(new[] { "youtube.com", "m.youtube.com", "ytimg.com", "googlevideo.com" });
+            v3.AllowedSites.RemoveAll(x => Presets.YouTubeHosts.Contains(x));
+            v3.Upgrade();
+            check("upgrade: YouTube moves from blocked to allowed", HostRules.From(v3).IsAllowed("music.youtube.com") && HostRules.From(v3).IsAllowed("i.ytimg.com") &&
+                  !HostRules.From(v3).IsAllowed("www.netflix.com"));
+            check("timer rhythms", Rhythm.Matching(new AppSettings()) == Rhythm.All[0] && Rhythm.All.Select(r => r.Focus).SequenceEqual(new[] { 25, 45, 90 }));
 
             // Allowed apps
             var guard = new AppGuard();

@@ -169,6 +169,8 @@ namespace Fokkus
         readonly Stepper focus, shortBreak, longBreak, sessions, opacity;
         readonly Toggle autoBreaks, autoFocus, strict, sound, autostart, closeToTray;
         readonly Segmented miniMode;
+        readonly FlatButton[] rhythms = new FlatButton[Rhythm.All.Length];
+        readonly Label rhythmHint;
 
         public SettingsPage(TrayContext ctx, Size size) : base(ctx, size)
         {
@@ -177,15 +179,24 @@ namespace Fokkus
             int rx = Pad + lw + S(28), rw = Width - Pad - rx;
 
             Section("Durations", lx, S(98), lw);
-            focus = Row("Focus", lx, S(124), 5, 180, 5, " min", v => Ctx.Settings.FocusMinutes = v);
-            shortBreak = Row("Short break", lx, S(166), 1, 30, 1, " min", v => Ctx.Settings.ShortBreakMinutes = v);
-            longBreak = Row("Long break", lx, S(208), 5, 60, 5, " min", v => Ctx.Settings.LongBreakMinutes = v);
-            sessions = Row("Long break after", lx, S(250), 2, 8, 1, " sessions", v => Ctx.Settings.SessionsBeforeLongBreak = v);
+            // One-click rhythms; the steppers below still fine-tune them.
+            int bw = (lw - 2 * S(8)) / 3;
+            for (int i = 0; i < Rhythm.All.Length; i++)
+            {
+                var r = Rhythm.All[i];
+                rhythms[i] = Button(r.Name, null, lx + i * (bw + S(8)), S(124), bw, S(36), (s, e) => ApplyRhythm(r));
+                rhythms[i].Font = Theme.F(9.5f);
+            }
+            rhythmHint = AddLabel("", Theme.F(8.5f), Theme.Muted, lx, S(164), lw, S(22), ContentAlignment.MiddleLeft);
+            focus = Row("Focus", lx, S(194), 5, 180, 5, " min", v => Ctx.Settings.FocusMinutes = v);
+            shortBreak = Row("Short break", lx, S(236), 1, 30, 1, " min", v => Ctx.Settings.ShortBreakMinutes = v);
+            longBreak = Row("Long break", lx, S(278), 5, 60, 5, " min", v => Ctx.Settings.LongBreakMinutes = v);
+            sessions = Row("Long break after", lx, S(320), 2, 8, 1, " sessions", v => Ctx.Settings.SessionsBeforeLongBreak = v);
 
-            Section("Flow", lx, S(302), lw);
-            autoBreaks = AddToggle("Start breaks automatically", null, lx, S(328), lw, (s, e) => { Ctx.Settings.AutoStartBreaks = autoBreaks.Checked; Save(); });
-            autoFocus = AddToggle("Start focus automatically after breaks", null, lx, S(366), lw, (s, e) => { Ctx.Settings.AutoStartFocus = autoFocus.Checked; Save(); });
-            strict = AddToggle("Strict mode", "No pause, skip, stop or quitting during focus, and the block lists can't be loosened.", lx, S(404), lw, (s, e) => { Ctx.Settings.StrictMode = strict.Checked; Save(); });
+            Section("Flow", lx, S(372), lw);
+            autoBreaks = AddToggle("Start breaks automatically", null, lx, S(398), lw, (s, e) => { Ctx.Settings.AutoStartBreaks = autoBreaks.Checked; Save(); });
+            autoFocus = AddToggle("Start focus automatically after breaks", null, lx, S(436), lw, (s, e) => { Ctx.Settings.AutoStartFocus = autoFocus.Checked; Save(); });
+            strict = AddToggle("Strict mode", "No pause, skip, stop or quitting during focus, and the block lists can't be loosened.", lx, S(474), lw, (s, e) => { Ctx.Settings.StrictMode = strict.Checked; Save(); });
 
             Section("Mini timer", rx, S(98), rw);
             miniMode = Place(new Segmented("Always", "In sessions", "Off"), rx, S(124), rw, S(36));
@@ -208,6 +219,16 @@ namespace Fokkus
             });
         }
 
+        void ApplyRhythm(Rhythm r)
+        {
+            var s = Ctx.Settings;
+            s.FocusMinutes = r.Focus;
+            s.ShortBreakMinutes = r.ShortBreak;
+            s.LongBreakMinutes = r.LongBreak;
+            s.SessionsBeforeLongBreak = r.Sessions;
+            Save();
+        }
+
         Stepper Row(string label, int x, int y, int min, int max, int step, string suffix, Action<int> set)
         {
             AddLabel(label, Theme.F(10), Theme.Text, x, y, S(170), S(34), ContentAlignment.MiddleLeft);
@@ -225,6 +246,15 @@ namespace Fokkus
             shortBreak.SetSilently(s.ShortBreakMinutes);
             longBreak.SetSilently(s.LongBreakMinutes);
             sessions.SetSilently(s.SessionsBeforeLongBreak);
+            var cur = Rhythm.Matching(s);
+            for (int i = 0; i < rhythms.Length; i++)
+            {
+                if (Rhythm.All[i] == cur) rhythms[i].SetAccent(Theme.Focus);
+                else rhythms[i].SetPlain();
+            }
+            rhythmHint.Text = (cur != null ? "" : "Custom: ") + s.FocusMinutes + " min focus · " + s.ShortBreakMinutes + " min break · " +
+                              s.LongBreakMinutes + " min long break after " + s.SessionsBeforeLongBreak +
+                              (Ctx.Engine.State != RunState.Idle ? "  (from the next phase)" : "");
             autoBreaks.SetSilently(s.AutoStartBreaks);
             autoFocus.SetSilently(s.AutoStartFocus);
             strict.SetSilently(s.StrictMode);

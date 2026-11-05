@@ -30,16 +30,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kk.fokkus.Perms
 import com.kk.fokkus.data.AppSettings
+import com.kk.fokkus.data.Rhythm
 import com.kk.fokkus.data.SettingsStore
 import com.kk.fokkus.data.TipKind
 import com.kk.fokkus.data.Tips
 import com.kk.fokkus.data.TimerDisplay
 import com.kk.fokkus.timer.Notifications
 import com.kk.fokkus.timer.Phase
+import com.kk.fokkus.timer.RunState
 import com.kk.fokkus.timer.TimerEngine
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -63,6 +66,30 @@ fun SettingsScreen(resumeTick: Int) {
         SectionTitle("Timer")
         Card {
             Column {
+                // One-tap rhythms; the steppers below still fine-tune them.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Rhythm.all.forEach { r ->
+                        val on = r.matches(s)
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .background(if (on) Palette.Focus else Palette.Surface2)
+                                .clickable { upd { r.applyTo(it) } }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(r.name.substringBefore(' '), color = if (on) Palette.OnAccent else Palette.Muted, fontSize = 11.sp)
+                                Text("${r.focus} min", color = if (on) Palette.OnAccent else Palette.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                Text(
+                    (if (Rhythm.all.any { it.matches(s) }) "" else "Custom: ") +
+                        "${s.focusMin} min focus · ${s.shortBreakMin} min break · ${s.longBreakMin} min long break after ${s.sessionsBeforeLong}" +
+                        if (st.run != RunState.IDLE) " (from the next phase)" else "",
+                    color = Palette.Muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                )
                 StepperRow("Focus", s.focusMin, " min", 5, 180, 5, { v -> upd { it.copy(focusMin = v) } })
                 StepperRow("Short break", s.shortBreakMin, " min", 1, 30, 1, { v -> upd { it.copy(shortBreakMin = v) } })
                 StepperRow("Long break", s.longBreakMin, " min", 5, 60, 5, { v -> upd { it.copy(longBreakMin = v) } })

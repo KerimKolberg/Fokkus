@@ -80,7 +80,7 @@ namespace Fokkus
         public List<string> DisabledApps { get; set; }
 
         // Bumped when defaults change, so existing settings get the new defaults once.
-        public const int CurrentVersion = 3;
+        public const int CurrentVersion = 4;
         public int SettingsVersion { get; set; }
 
         public bool IsOn(Filter f)
@@ -240,6 +240,14 @@ namespace Fokkus
                 DisabledBlockedSites.Clear();
                 DisabledApps.Clear();
             }
+            if (SettingsVersion < 4)
+            {
+                // v4: YouTube is for study music - off the blocked list, onto the allowed list.
+                BlockedSites.RemoveAll(x => Presets.YouTubeHosts.Any(y => x == y || x.EndsWith("." + y, StringComparison.Ordinal)));
+                foreach (var p in Presets.AllowSites.Where(x => x.Name == Presets.YouTubePreset))
+                    foreach (var item in p.Items)
+                        if (!Has(AllowedSites, item)) AllowedSites.Add(item);
+            }
             SettingsVersion = CurrentVersion;
         }
 
@@ -306,6 +314,31 @@ namespace Fokkus
             for (int i = 0; i < Theme.Series.Length; i++)
                 if (!Subjects.Any(s => s.ColorIndex == i)) return i;
             return Theme.Series.Length;
+        }
+    }
+
+    // Ready-made timer rhythms (shortcuts on the Settings page).
+    class Rhythm
+    {
+        public readonly string Name;
+        public readonly int Focus, ShortBreak, LongBreak, Sessions;
+
+        Rhythm(string name, int focus, int shortBreak, int longBreak, int sessions)
+        {
+            Name = name; Focus = focus; ShortBreak = shortBreak; LongBreak = longBreak; Sessions = sessions;
+        }
+
+        public static readonly Rhythm[] All =
+        {
+            new Rhythm("Pomodoro 25", 25, 5, 15, 4),
+            new Rhythm("Pomodoro 45", 45, 10, 20, 3),
+            new Rhythm("Ultradian 90", 90, 20, 30, 2),
+        };
+
+        public static Rhythm Matching(AppSettings s)
+        {
+            return All.FirstOrDefault(r => r.Focus == s.FocusMinutes && r.ShortBreak == s.ShortBreakMinutes &&
+                                           r.LongBreak == s.LongBreakMinutes && r.Sessions == s.SessionsBeforeLongBreak);
         }
     }
 
