@@ -158,6 +158,136 @@ namespace Fokkus
             return true;
         }
 
+        // ------------------------------------------------------------ profiles
+
+        // Switches to a profile's four functions + strict mode. In strict mode a profile that loosens the lock is refused.
+        public bool ApplyProfile(Profile p, bool automatic)
+        {
+            if (p == null) return false;
+            if (StrictLocked && p.Loosens(Settings))
+            {
+                if (!automatic) StrictNotice();
+                return false;
+            }
+            bool changed = !p.Matches(Settings) || Settings.ActiveProfileId != p.Id;
+            p.ApplyTo(Settings);
+            if (changed) SettingsChanged();
+            if (!Headless) mini.Flash(p.Name + " profile");
+            return true;
+        }
+
+        // A subject can switch on its own profile when you pick it (e.g. Programming -> "Programming").
+        void ApplySubjectProfile(Subject s)
+        {
+            var p = s == null ? null : Settings.FindProfile(s.ProfileId);
+            if (p != null && !p.Matches(Settings)) ApplyProfile(p, true);
+        }
+
+        public string ProfileLabel
+        {
+            get { var p = Settings.CurrentProfile(); return p != null ? p.Name : "Custom"; }
+        }
+
+        IWin32Window DialogOwner { get { return main != null && !main.IsDisposed && main.Visible ? main : null; } }
+
+        // Menu: pick a profile, save the current switches as one, update / rename / delete, and link profiles to subjects.
+        public void FillProfileMenu(ToolStripItemCollection items)
+        {
+            items.Clear();
+            var cur = Settings.CurrentProfile();
+            foreach (var p in Settings.Profiles)
+            {
+                var prof = p;
+                var it = new ToolStripMenuItem(p.Name, null, (s, e) => ApplyProfile(prof, false));
+                it.Checked = p == cur;
+                it.ToolTipText = Describe(p);
+                items.Add(it);
+            }
+            items.Add(new ToolStripSeparator());
+            items.Add(new ToolStripMenuItem("Save current switches as a new profile…", null, (s, e) =>
+            {
+                string name = Dialogs.AskText(DialogOwner, "New profile", "Name for the current switches:", "");
+                if (name == null) return;
+                var p = new Profile { Name = name };
+                p.CaptureFrom(Settings);
+                Settings.Profiles.Add(p);
+                Settings.ActiveProfileId = p.Id;
+                SettingsChanged();
+            }));
+            var last = Settings.FindProfile(Settings.ActiveProfileId);
+            if (last != null)
+            {
+                var upd = new ToolStripMenuItem("Update “" + last.Name + "” to the current switches", null, (s, e) => { last.CaptureFrom(Settings); SettingsChanged(); });
+                upd.Enabled = !last.Matches(Settings);
+                items.Add(upd);
+                items.Add(new ToolStripMenuItem("Rename “" + last.Name + "”…", null, (s, e) =>
+                {
+                    string name = Dialogs.AskText(DialogOwner, "Rename profile", "New name:", last.Name);
+                    if (name != null) { last.Name = name; SettingsChanged(); }
+                }));
+                var del = new ToolStripMenuItem("Delete “" + last.Name + "”", null, (s, e) =>
+                {
+                    Settings.Profiles.Remove(last);
+                    foreach (var subj in Settings.Subjects) if (subj.ProfileId == last.Id) subj.ProfileId = null;
+                    Settings.ActiveProfileId = null;
+                    SettingsChanged();
+                });
+                del.Enabled = Settings.Profiles.Count > 1;
+                items.Add(del);
+            }
+            items.Add(new ToolStripSeparator());
+            var link = new ToolStripMenuItem("Switch on automatically for a subject");
+            if (Settings.Subjects.Count == 0)
+            {
+                link.Text = "Switch on automatically for a subject (add subjects first)";
+                link.Enabled = false;
+            }
+            foreach (var subj in Settings.Subjects)
+            {
+                var sj = subj;
+                var linked = Settings.FindProfile(subj.ProfileId);
+                var sub = new ToolStripMenuItem(subj.Name + (linked != null ? "  →  " + linked.Name : ""));
+                var none = new ToolStripMenuItem("No profile", null, (s, e) => { sj.ProfileId = null; SettingsChanged(); });
+                none.Checked = linked == null;
+                sub.DropDownItems.Add(none);
+                foreach (var p in Settings.Profiles)
+                {
+                    var prof = p;
+                    var pi = new ToolStripMenuItem(p.Name, null, (s, e) =>
+                    {
+                        sj.ProfileId = prof.Id;
+                        SettingsChanged();
+                        if (Settings.ActiveSubjectId == sj.Id) ApplyProfile(prof, false);
+                    });
+                    pi.Checked = linked == p;
+                    sub.DropDownItems.Add(pi);
+                }
+                DarkSubmenu(sub);
+                link.DropDownItems.Add(sub);
+            }
+            DarkSubmenu(link);
+            items.Add(link);
+        }
+
+        // Submenus don't inherit the dark renderer by themselves.
+        public static void DarkSubmenu(ToolStripMenuItem m)
+        {
+            m.DropDown.Renderer = new DarkMenuRenderer();
+            m.DropDown.Font = Theme.F(9.5f);
+            var dd = m.DropDown as ToolStripDropDownMenu;
+            if (dd != null) { dd.ShowImageMargin = false; dd.ShowCheckMargin = true; }
+        }
+
+        public static string Describe(Profile p)
+        {
+            var on = new List<string>();
+            if (p.AllowSitesOn) on.Add("allowed websites");
+            if (p.BlockSitesOn) on.Add("blocked websites");
+            if (p.AllowAppsOn) on.Add("allowed apps");
+            if (p.BlockAppsOn) on.Add("blocked apps");
+            return (on.Count == 0 ? "No blocking" : "On: " + string.Join(", ", on)) + (p.Strict ? " · strict mode" : "");
+        }
+
         public static string FilterName(Filter f)
         {
             switch (f)
@@ -309,6 +439,8 @@ namespace Fokkus
                 Settings.ActiveSubjectId = next.Id;
                 if (!Headless) Settings.Save();
                 planNote = "✅ " + cur.Name + " done for today. Next up: " + next.Name + ".";
+                // Its profile (if any) is switched on after the engine has finished this phase change.
+                try { invoker.BeginInvoke(new Action(() => ApplySubjectProfile(next))); } catch { }
             }
             else planNote = "✅ " + cur.Name + " done for today. " + next.Name + " is still open.";
         }
@@ -319,6 +451,7 @@ namespace Fokkus
             Settings.Save();
             mini.RefreshView();
             if (main != null && !main.IsDisposed) main.RefreshAll();
+            ApplySubjectProfile(Planner.Active(Settings));
         }
 
         public void PlanChanged()
@@ -606,6 +739,11 @@ namespace Fokkus
                 Settings.Subjects.Add(s);
             }
             Settings.ActiveSubjectId = Settings.Subjects[1].Id;
+            Settings.Subjects[0].Deadline = DateTime.Today.AddDays(5).ToString("yyyy-MM-dd");
+            Settings.Subjects[0].DeadlineLabel = "Exam";
+            Settings.Subjects[3].Deadline = DateTime.Today.AddDays(2).ToString("yyyy-MM-dd");
+            Settings.Subjects[3].DeadlineLabel = "Project";
+            Settings.Subjects[2].ProfileId = "coding";
             Settings.PlanSince = DateTime.Today.AddDays(-56).ToString("yyyy-MM-dd");
             var rnd = new Random(7);
             for (int back = 56; back >= 0; back--)
@@ -665,7 +803,11 @@ namespace Fokkus
             var filters = new[] { Filter.AllowSites, Filter.BlockSites, Filter.AllowApps, Filter.BlockApps };
             var filterItems = filters.Select(f => new ToolStripMenuItem(FilterName(f), null, (s, e) => SetFilter(f, !Settings.IsOn(f)))).ToArray();
             var during = new ToolStripMenuItem("During focus") { Enabled = false };
-            m.Items.AddRange(new ToolStripItem[] { status, new ToolStripSeparator(), toggle, skip, stop, new ToolStripSeparator(), during });
+            var profileItem = new ToolStripMenuItem("Profile");
+            profileItem.DropDownItems.Add("…");
+            DarkSubmenu(profileItem);
+            profileItem.DropDownOpening += (s, e) => FillProfileMenu(profileItem.DropDownItems);
+            m.Items.AddRange(new ToolStripItem[] { status, new ToolStripSeparator(), toggle, skip, stop, new ToolStripSeparator(), profileItem, during });
             m.Items.AddRange(filterItems);
             m.Items.AddRange(new ToolStripItem[] { new ToolStripSeparator(), miniItem, tip, open, new ToolStripSeparator(), quit });
             m.Opening += (s, e) =>
@@ -678,6 +820,7 @@ namespace Fokkus
                 stop.Enabled = st != RunState.Idle && !StrictLocked;
                 miniItem.Checked = mini.Visible;
                 for (int i = 0; i < filters.Length; i++) filterItems[i].Checked = Settings.IsOn(filters[i]);
+                profileItem.Text = "Profile: " + ProfileLabel;
                 quit.Enabled = !StrictLocked;
                 quit.Text = StrictLocked ? "Quit (locked until focus ends)" : "Quit";
             };

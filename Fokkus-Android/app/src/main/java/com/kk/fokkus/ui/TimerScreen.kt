@@ -59,6 +59,7 @@ import com.kk.fokkus.data.SettingsStore
 import com.kk.fokkus.data.Subject
 import com.kk.fokkus.data.SubjectColors
 import com.kk.fokkus.data.TimerDisplay
+import com.kk.fokkus.data.withSubject
 import com.kk.fokkus.timer.Phase
 import com.kk.fokkus.timer.RunState
 import com.kk.fokkus.timer.TimerEngine
@@ -88,7 +89,7 @@ fun TimerScreen(resumeTick: Int, requestNotifications: () -> Unit, onOpenPlan: (
     val (done, target) = Planner.totals(s, records)
     val active = Planner.active(s)
     val select: (String?) -> Unit = { id ->
-        SettingsStore.update { it.copy(activeSubjectId = id) }
+        SettingsStore.update { it.withSubject(id, strict) }
         TimerEngine.settingsChanged()
     }
 
@@ -194,8 +195,9 @@ fun TimerScreen(resumeTick: Int, requestNotifications: () -> Unit, onOpenPlan: (
         )
 
         // Quick switches for the four functions: decide per session what gets locked
-        // (e.g. only "Blocked websites" for a programming session).
-        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // (e.g. only "Blocked websites" for a programming session) — or all at once with a profile.
+        ProfilePicker(s, strict, Modifier.fillMaxWidth().padding(top = 14.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             FilterQuick("Allowed", "websites", R.drawable.ic_globe, s.allowSitesOn, strict, Modifier.weight(1f)) { a, v -> a.copy(allowSitesOn = v) }
             FilterQuick("Blocked", "websites", R.drawable.ic_shield, s.blockSitesOn, strict, Modifier.weight(1f)) { a, v -> a.copy(blockSitesOn = v) }
         }
@@ -290,6 +292,14 @@ private fun TodayPlanCard(rows: List<PlanRow>, active: Subject?, done: Int, targ
                         Spacer(Modifier.width(10.dp))
                         Text(r.subject.name, color = Palette.Text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
+                        // Deadline badge: amber in the last week, red in the last 3 days. "+1" = suggested extra pomodoro.
+                        Planner.badge(r)?.let { b ->
+                            val d = r.daysLeft ?: 99
+                            val bc = when { d <= 3 -> Palette.Warn; d <= 7 -> Palette.ShortBreak; else -> Palette.Muted }
+                            Text(b, color = bc, fontSize = 11.sp, maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 6.dp).clip(RoundedCornerShape(6.dp))
+                                    .background(bc.copy(alpha = 0.16f)).padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
                         val finished = r.target > 0 && r.done >= r.target
                         Text(if (finished) "✓ done" else if (r.target > 0) "${r.done}/${r.target}" else "${r.done}",
                             color = if (finished) Palette.Focus else Palette.Text, fontSize = 14.sp)

@@ -99,7 +99,19 @@ namespace Fokkus
                 bool done = r.Target > 0 && r.Done >= r.Target;
                 string right = r.Target > 0 ? r.Done + "/" + r.Target : r.Done + "";
                 int rw = Theme.S(54);
-                Theme.DrawText(g, r.Subject.Name, active ? Theme.FB(10) : Theme.F(10), Theme.Text, new Rectangle(Theme.S(28), y + Theme.S(2), Width - Theme.S(28) - rw, Theme.S(22)), Theme.Left);
+                // Deadline badge: amber in the last week, red in the last 3 days. "+1" = suggested extra pomodoro today.
+                string badge = Planner.Badge(r);
+                int bw = 0;
+                if (badge != null)
+                {
+                    int dl = r.DaysLeft.Value;
+                    Color bc = dl <= 3 ? Theme.Warn : dl <= 7 ? Theme.ShortBreak : Theme.Muted;
+                    bw = TextRenderer.MeasureText(badge, Theme.F(8)).Width + Theme.S(12);
+                    var br = new RectangleF(Width - rw - bw, y + Theme.S(3), bw - Theme.S(4), Theme.S(19));
+                    Theme.FillRound(g, Theme.Blend(bc, Theme.Bg, 0.78f), br, Theme.S(6));
+                    Theme.DrawText(g, badge, Theme.F(8), bc, Rectangle.Round(br), Theme.Center);
+                }
+                Theme.DrawText(g, r.Subject.Name, active ? Theme.FB(10) : Theme.F(10), Theme.Text, new Rectangle(Theme.S(28), y + Theme.S(2), Width - Theme.S(28) - rw - bw, Theme.S(22)), Theme.Left);
                 Theme.DrawText(g, done ? Glyph.Check + "" : right, done ? Theme.Icons(9) : Theme.FB(9.5f), done ? Theme.Focus : Theme.Text,
                     new Rectangle(Width - rw, y + Theme.S(2), rw - Theme.S(10), Theme.S(22)), Theme.Right);
                 // progress
@@ -224,7 +236,17 @@ namespace Fokkus
                 else if (i == hoverRow) Theme.FillRound(g, Theme.Surface, rowRect, Theme.S(10));
                 Color c = Theme.SubjectColor(s);
                 using (var b = new SolidBrush(c)) g.FillEllipse(b, Theme.S(12), y + RowH / 2 - Theme.S(5), Theme.S(10), Theme.S(10));
-                Theme.DrawText(g, s.Name, sel ? Theme.FB(10.5f) : Theme.F(10.5f), Theme.Text, new Rectangle(Theme.S(30), y, NameW - Theme.S(36), RowH), Theme.Left);
+                var left = Planner.DaysLeft(s, DateTime.Today);
+                if (left.HasValue)
+                {
+                    // Name on top, the deadline countdown below it.
+                    int dl = left.Value;
+                    Color dc = dl <= 3 ? Theme.Warn : dl <= 7 ? Theme.ShortBreak : Theme.Muted;
+                    Theme.DrawText(g, s.Name, sel ? Theme.FB(10) : Theme.F(10), Theme.Text, new Rectangle(Theme.S(30), y + Theme.S(2), NameW - Theme.S(36), Theme.S(20)), Theme.Left);
+                    Theme.DrawText(g, Planner.DeadlineText(s, dl), Theme.F(7.5f), dc, new Rectangle(Theme.S(30), y + Theme.S(19), NameW - Theme.S(36), Theme.S(16)), Theme.Left);
+                }
+                else
+                    Theme.DrawText(g, s.Name, sel ? Theme.FB(10.5f) : Theme.F(10.5f), Theme.Text, new Rectangle(Theme.S(30), y, NameW - Theme.S(36), RowH), Theme.Left);
                 for (int d = 0; d < 7; d++)
                 {
                     int v = s.Targets[d];

@@ -15,12 +15,79 @@ namespace Fokkus
         public string Name { get; set; }
         public int ColorIndex { get; set; }
         public List<int> Targets { get; set; }
+        public string Deadline { get; set; }        // yyyy-MM-dd, or null
+        public string DeadlineLabel { get; set; }   // "Exam", "Project due"...
+        public string ProfileId { get; set; }       // profile switched on when you study this subject, or null
 
         public Subject()
         {
             Id = Guid.NewGuid().ToString("N").Substring(0, 10);
             Name = "Subject";
             Targets = new List<int> { 0, 0, 0, 0, 0, 0, 0 };
+        }
+
+        public DateTime? DeadlineDate
+        {
+            get
+            {
+                DateTime d;
+                return Deadline != null && DateTime.TryParseExact(Deadline, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)
+                    ? d : (DateTime?)null;
+            }
+        }
+    }
+
+    // A saved combination of the four blocking functions + strict mode ("Programming", "Exam prep"...).
+    public class Profile
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public bool AllowSitesOn { get; set; }
+        public bool BlockSitesOn { get; set; }
+        public bool AllowAppsOn { get; set; }
+        public bool BlockAppsOn { get; set; }
+        public bool Strict { get; set; }
+
+        public Profile() { Id = Guid.NewGuid().ToString("N").Substring(0, 10); Name = "Profile"; }
+
+        static Profile Make(string id, string name, bool allowSites, bool blockSites, bool allowApps, bool blockApps, bool strict)
+        {
+            return new Profile { Id = id, Name = name, AllowSitesOn = allowSites, BlockSitesOn = blockSites, AllowAppsOn = allowApps, BlockAppsOn = blockApps, Strict = strict };
+        }
+
+        public static List<Profile> Defaults()
+        {
+            return new List<Profile>
+            {
+                Make("study", "Study", true, false, false, true, false),
+                Make("coding", "Programming", false, true, false, true, false),
+                Make("exam", "Exam prep", true, true, true, true, true),
+                Make("timer", "Just the timer", false, false, false, false, false),
+            };
+        }
+
+        public bool Matches(AppSettings s)
+        {
+            return s.AllowSitesOn == AllowSitesOn && s.BlockSitesOn == BlockSitesOn && s.AllowAppsOn == AllowAppsOn &&
+                   s.BlockAppsOn == BlockAppsOn && s.StrictMode == Strict;
+        }
+
+        public void CaptureFrom(AppSettings s)
+        {
+            AllowSitesOn = s.AllowSitesOn; BlockSitesOn = s.BlockSitesOn; AllowAppsOn = s.AllowAppsOn; BlockAppsOn = s.BlockAppsOn; Strict = s.StrictMode;
+        }
+
+        // Switching from the current settings to this profile would loosen the lock.
+        public bool Loosens(AppSettings s)
+        {
+            return (s.AllowSitesOn && !AllowSitesOn) || (s.BlockSitesOn && !BlockSitesOn) || (s.AllowAppsOn && !AllowAppsOn) ||
+                   (s.BlockAppsOn && !BlockAppsOn) || (s.StrictMode && !Strict);
+        }
+
+        public void ApplyTo(AppSettings s)
+        {
+            s.AllowSitesOn = AllowSitesOn; s.BlockSitesOn = BlockSitesOn; s.AllowAppsOn = AllowAppsOn; s.BlockAppsOn = BlockAppsOn; s.StrictMode = Strict;
+            s.ActiveProfileId = Id;
         }
     }
 
@@ -34,6 +101,10 @@ namespace Fokkus
         public string ActiveSubjectId { get; set; }
         public bool AutoNextSubject { get; set; }
         public string PlanSince { get; set; }   // yyyy-MM-dd: plan targets count from this day on
+
+        // Session profiles
+        public List<Profile> Profiles { get; set; }
+        public string ActiveProfileId { get; set; }   // the profile applied last (it may have been changed since)
 
         public DateTime PlanStart
         {
@@ -128,6 +199,7 @@ namespace Fokkus
         public AppSettings()
         {
             Subjects = new List<Subject>();
+            Profiles = Profile.Defaults();
             AutoNextSubject = true;
             FocusMinutes = 25;
             ShortBreakMinutes = 5;
@@ -309,7 +381,29 @@ namespace Fokkus
                 for (int i = 0; i < 7; i++) s.Targets[i] = Clamp(s.Targets[i], 0, 16);
             }
             if (ActiveSubjectId != null && !Subjects.Any(x => x.Id == ActiveSubjectId)) ActiveSubjectId = null;
+            if (Profiles == null) Profiles = Profile.Defaults();
+            Profiles.RemoveAll(p => p == null || string.IsNullOrEmpty(p.Id));
+            foreach (var p in Profiles) if (string.IsNullOrWhiteSpace(p.Name)) p.Name = "Profile";
+            if (ActiveProfileId != null && FindProfile(ActiveProfileId) == null) ActiveProfileId = null;
+            foreach (var s in Subjects)
+            {
+                if (s.ProfileId != null && FindProfile(s.ProfileId) == null) s.ProfileId = null;
+                if (s.Deadline != null && s.DeadlineDate == null) s.Deadline = null;
+            }
             if (Subjects.Count > 0 && PlanSince == null) PlanSince = DateTime.Today.ToString("yyyy-MM-dd");
+        }
+
+        public Profile FindProfile(string id)
+        {
+            return id == null ? null : Profiles.FirstOrDefault(p => p.Id == id);
+        }
+
+        // The profile that describes the current switches (the last applied one first), or null.
+        public Profile CurrentProfile()
+        {
+            var last = FindProfile(ActiveProfileId);
+            if (last != null && last.Matches(this)) return last;
+            return Profiles.FirstOrDefault(p => p.Matches(this));
         }
 
         // Next free colour slot (0..7); 8 = the neutral "other" colour once all are taken.

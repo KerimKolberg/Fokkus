@@ -82,6 +82,34 @@ namespace Fokkus
             v4.CloseToTray = false;
             v4.Upgrade();
             check("upgrade: minimizing keeps its old behavior", !v4.MinimizeToTray && new AppSettings().MinimizeToTray);
+            // Session profiles
+            var ps = new AppSettings();
+            var coding = ps.Profiles.First(p => p.Name == "Programming");
+            check("profiles: defaults", ps.Profiles.Count == 4 && ps.CurrentProfile() != null && ps.CurrentProfile().Name == "Study");
+            coding.ApplyTo(ps);
+            check("profiles: Programming = blocked websites only", !ps.AllowSitesOn && ps.BlockSitesOn && ps.BlockAppsOn && ps.CurrentProfile() == coding);
+            var exam = ps.Profiles.First(p => p.Name == "Exam prep");
+            check("profiles: loosening detected", !exam.Loosens(ps) && coding.Loosens(new AppSettings { StrictMode = true }));
+            ps.BlockAppsOn = false;
+            check("profiles: changed switches = custom", ps.CurrentProfile() == null);
+
+            // Deadlines
+            var ds = new AppSettings();
+            var dstore = new SessionStore();
+            dstore.ReadOnly = true;
+            var subjA = new Subject { Name = "A", Targets = Enumerable.Repeat(1, 7).ToList() };
+            var subjB = new Subject { Name = "B", Targets = Enumerable.Repeat(1, 7).ToList(), Deadline = DateTime.Today.AddDays(2).ToString("yyyy-MM-dd") };
+            var subjC = new Subject { Name = "C", Targets = Enumerable.Repeat(0, 7).ToList(), Deadline = DateTime.Today.AddDays(6).ToString("yyyy-MM-dd") };
+            var past = new Subject { Name = "D", Deadline = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd") };
+            ds.Subjects.AddRange(new[] { subjA, subjB, subjC, past });
+            check("deadlines: days left", Planner.DaysLeft(subjB, DateTime.Today) == 2 && Planner.DaysLeft(past, DateTime.Today) == null && Planner.DaysLeft(subjA, DateTime.Today) == null);
+            check("deadlines: extra pomodoros", Planner.ExtraFor(10) == 0 && Planner.ExtraFor(6) == 1 && Planner.ExtraFor(2) == 2);
+            var drows = Planner.Today(ds, dstore);
+            check("deadlines: close deadline shows up in today's plan", drows.Any(r => r.Subject == subjC && r.Extra == 1) && drows.First(r => r.Subject == subjB).Extra == 2);
+            check("deadlines: nearest deadline first", Planner.NextPending(ds, dstore, null) == subjB && Planner.NextPending(ds, dstore, subjA.Id) == subjA);
+            int dleft;
+            check("deadlines: next deadline", Planner.NextDeadline(ds, out dleft) == subjB && dleft == 2 && Planner.DeadlineText(subjB, 2) == "Deadline in 2 days");
+
             check("timer rhythms", Rhythm.Matching(new AppSettings()) == Rhythm.All[0] && Rhythm.All.Select(r => r.Focus).SequenceEqual(new[] { 25, 45, 90 }));
 
             // Allowed apps

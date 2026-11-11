@@ -10,6 +10,7 @@ import com.kk.fokkus.data.FocusRecord
 import com.kk.fokkus.data.Planner
 import com.kk.fokkus.data.SessionLog
 import com.kk.fokkus.data.SettingsStore
+import com.kk.fokkus.data.withSubject
 import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -73,7 +74,7 @@ object TimerEngine {
         val now = System.currentTimeMillis()
         // Nothing picked yet: study whatever today's plan says is next.
         if ((s.run == RunState.IDLE || (s.run == RunState.READY && s.phase == Phase.FOCUS)) && Planner.active(SettingsStore.current) == null) {
-            Planner.nextPending(SettingsStore.current, null)?.let { next -> SettingsStore.update { it.copy(activeSubjectId = next.id) } }
+            Planner.nextPending(SettingsStore.current, null)?.let { next -> SettingsStore.update { it.withSubject(next.id, strictLocked) } }
         }
         when (s.run) {
             RunState.RUNNING -> return
@@ -155,7 +156,7 @@ object TimerEngine {
         return when {
             next == null -> "✅ ${subject.name} done — today's whole plan is complete!"
             settings.autoNextSubject -> {
-                SettingsStore.update { it.copy(activeSubjectId = next.id) }
+                SettingsStore.update { it.withSubject(next.id, strictLocked) }
                 "✅ ${subject.name} done for today. Next up: ${next.name}."
             }
             else -> "✅ ${subject.name} done for today. ${next.name} is still open."

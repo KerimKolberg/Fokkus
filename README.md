@@ -6,7 +6,7 @@ A Pomodoro study app for **Windows** and **Android**. Plan your week per subject
 Fokkus-Windows/   – C# source, build.cmd, installer/ (Inno Setup script)
 Fokkus-Android/   – Kotlin / Jetpack Compose project (open in Android Studio)
 dist/             – build output (not in git):
-  Fokkus-Setup-1.3.1.exe – Windows installer
+  Fokkus-Setup-1.4.0.exe – Windows installer
   Fokkus.exe             – Windows app, portable (no install)
   Fokkus.apk             – Android app (sideload)
 ```
@@ -20,6 +20,8 @@ dist/             – build output (not in git):
 | | Windows | Android |
 |---|---|---|
 | Pomodoro: focus, short break, long break every N sessions, auto-start options | ✅ | ✅ |
+| **Session profiles**: Study, Programming, Exam prep, Just the timer, or your own; one click sets all four blocking switches + strict mode, and a subject can switch its profile on automatically | Timer page + tray menu | Timer tab; subject → Edit |
+| **Deadlines**: exam / due date per subject with a countdown; in the last week today's plan suggests +1 pomodoro (+2 in the last 3 days) and the nearest deadline goes first | Plan → Deadline | Plan → edit a subject |
 | **One-click rhythms** in Settings: Pomodoro 25 (25/5, long 15 after 4), Pomodoro 45 (45/10, long 20 after 3), Ultradian 90 (90/20, long 30 after 2) | ✅ | ✅ |
 | **Weekly study plan**: pomodoros per subject per weekday | grid: click +1, right-click −1 | tap +1, long-press −1 |
 | **Subject picker** + today's plan progress beside the timer | ✅ | ✅ |
@@ -60,7 +62,7 @@ Example: for a programming session where you only want to keep social media & co
 
 ## Windows
 
-**Install:** run `Fokkus-Setup-1.3.1.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
+**Install:** run `Fokkus-Setup-1.4.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
 - a desktop shortcut and a Start menu entry
 - an entry in *Settings → Apps*, from where you can uninstall. The uninstaller asks whether to keep your plan and statistics.
 
@@ -90,7 +92,7 @@ Fokkus.exe --restore-internet
 ```bash
 winget install JRSoftware.InnoSetup
 ```
-`Fokkus.exe --selftest out.txt` runs 49 built-in tests (all four filter combinations, the live proxy, plan and statistics math).
+`Fokkus.exe --selftest out.txt` runs 58 built-in tests (all four filter combinations, the live proxy, plan and statistics math).
 
 Data lives in `%APPDATA%\Fokkus\`:
 - `settings.json`

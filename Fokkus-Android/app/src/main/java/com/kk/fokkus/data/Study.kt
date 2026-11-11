@@ -15,8 +15,21 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.UUID
 
-/** A subject in the weekly study plan. targets = pomodoros per weekday, Monday first. */
-data class Subject(val id: String, val name: String, val colorIndex: Int, val targets: List<Int>) {
+/**
+ * A subject in the weekly study plan. targets = pomodoros per weekday, Monday first.
+ * deadline = yyyy-MM-dd of an exam / due date; profileId = profile switched on when you study it.
+ */
+data class Subject(
+    val id: String,
+    val name: String,
+    val colorIndex: Int,
+    val targets: List<Int>,
+    val deadline: String? = null,
+    val deadlineLabel: String? = null,
+    val profileId: String? = null,
+) {
+    val deadlineDate: LocalDate? get() = deadline?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
     companion object {
         fun create(name: String, colorIndex: Int) =
             Subject(UUID.randomUUID().toString().take(10), name, colorIndex, List(7) { 0 })
@@ -104,7 +117,8 @@ object SessionLog {
     }
 }
 
-data class PlanRow(val subject: Subject, val target: Int, val done: Int)
+/** daysLeft = days until the subject's deadline (0 = today); extra = pomodoros suggested on top because it's close. */
+data class PlanRow(val subject: Subject, val target: Int, val done: Int, val daysLeft: Int? = null, val extra: Int = 0)
 
 object Planner {
     val dayShort = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -118,13 +132,40 @@ object Planner {
 
     fun today(s: AppSettings, list: List<FocusRecord> = SessionLog.records.value): List<PlanRow> {
         val today = LocalDate.now()
-        return s.subjects.map { PlanRow(it, target(it, today), SessionLog.pomodorosOn(today, it.id, list)) }
-            .filter { it.target > 0 || it.done > 0 }
+        return s.subjects.map {
+            val left = daysLeft(it, today)
+            PlanRow(it, target(it, today), SessionLog.pomodorosOn(today, it.id, list), left, left?.let(::extraFor) ?: 0)
+        }.filter { it.target > 0 || it.done > 0 || it.extra > 0 }
     }
 
+    /** Subjects with the nearest deadline come first, then the plan order. */
     fun nextPending(s: AppSettings, preferId: String?, list: List<FocusRecord> = SessionLog.records.value): Subject? {
-        val pending = today(s, list).filter { it.done < it.target }
+        val pending = today(s, list).filter { it.done < it.target }.sortedBy { it.daysLeft ?: Int.MAX_VALUE }
         return pending.firstOrNull { it.subject.id == preferId }?.subject ?: pending.firstOrNull()?.subject
+    }
+
+    // ---- deadlines
+
+    fun daysLeft(s: Subject, today: LocalDate = LocalDate.now()): Int? {
+        val d = s.deadlineDate ?: return null
+        val days = java.time.temporal.ChronoUnit.DAYS.between(today, d).toInt()
+        return days.takeIf { it >= 0 }
+    }
+
+    /** Close to a deadline you get a nudge for more: +1 pomodoro in the last week, +2 in the last 3 days. */
+    fun extraFor(daysLeft: Int) = when { daysLeft <= 3 -> 2; daysLeft <= 7 -> 1; else -> 0 }
+
+    fun deadlineText(s: Subject, daysLeft: Int): String {
+        val label = s.deadlineLabel?.trim()?.ifEmpty { null } ?: "Deadline"
+        return label + when (daysLeft) { 0 -> " today"; 1 -> " tomorrow"; else -> " in $daysLeft days" }
+    }
+
+    /** Small badge for today's plan, e.g. "Exam 5d · +1" (shown in the last two weeks). */
+    fun badge(r: PlanRow): String? {
+        val d = r.daysLeft ?: return null
+        if (d > 14) return null
+        val label = (r.subject.deadlineLabel?.trim()?.ifEmpty { null } ?: "Due").take(10)
+        return "$label ${if (d == 0) "today" else "${d}d"}" + if (r.extra > 0) " · +${r.extra}" else ""
     }
 
     /** (done, target) for today, done capped per subject. */

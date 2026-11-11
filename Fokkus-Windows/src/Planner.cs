@@ -9,6 +9,8 @@ namespace Fokkus
         public Subject Subject;
         public int Target;
         public int Done;
+        public int? DaysLeft;   // days until the subject's deadline (0 = today), null if none
+        public int Extra;       // extra pomodoros suggested today because the deadline is close
     }
 
     // The weekly study plan: which subject today, and how far along you are.
@@ -37,16 +39,63 @@ namespace Fokkus
             var rows = new List<PlanRow>();
             foreach (var subj in s.Subjects)
             {
-                var row = new PlanRow { Subject = subj, Target = Target(subj, today), Done = store.PomodorosOn(today, subj.Id) };
-                if (row.Target > 0 || row.Done > 0) rows.Add(row);
+                var row = new PlanRow { Subject = subj, Target = Target(subj, today), Done = store.PomodorosOn(today, subj.Id), DaysLeft = DaysLeft(subj, today) };
+                row.Extra = row.DaysLeft.HasValue ? ExtraFor(row.DaysLeft.Value) : 0;
+                if (row.Target > 0 || row.Done > 0 || row.Extra > 0) rows.Add(row);
             }
             return rows;
         }
 
+        // ---- deadlines
+
+        public static int? DaysLeft(Subject s, DateTime today)
+        {
+            var d = s.DeadlineDate;
+            if (!d.HasValue) return null;
+            int days = (int)(d.Value.Date - today.Date).TotalDays;
+            return days >= 0 ? days : (int?)null;
+        }
+
+        // Close to a deadline you get a nudge for more: +1 pomodoro in the last week, +2 in the last 3 days.
+        public static int ExtraFor(int daysLeft) { return daysLeft <= 3 ? 2 : daysLeft <= 7 ? 1 : 0; }
+
+        public static string DeadlineText(Subject s, int daysLeft)
+        {
+            string label = string.IsNullOrWhiteSpace(s.DeadlineLabel) ? "Deadline" : s.DeadlineLabel.Trim();
+            return label + (daysLeft == 0 ? " today" : daysLeft == 1 ? " tomorrow" : " in " + daysLeft + " days");
+        }
+
+        public static string ShortDeadline(int daysLeft) { return daysLeft == 0 ? "today" : daysLeft == 1 ? "1 day" : daysLeft + " days"; }
+
+        // Small badge for today's plan, e.g. "Exam 5d · +1" (shown in the last two weeks).
+        public static string Badge(PlanRow r)
+        {
+            if (!r.DaysLeft.HasValue || r.DaysLeft.Value > 14) return null;
+            string label = string.IsNullOrWhiteSpace(r.Subject.DeadlineLabel) ? "Due" : r.Subject.DeadlineLabel.Trim();
+            if (label.Length > 10) label = label.Substring(0, 10);
+            int d = r.DaysLeft.Value;
+            return label + " " + (d == 0 ? "today" : d + "d") + (r.Extra > 0 ? " · +" + r.Extra : "");
+        }
+
+        // The nearest upcoming deadline across all subjects, or null.
+        public static Subject NextDeadline(AppSettings s, out int daysLeft)
+        {
+            Subject best = null;
+            daysLeft = int.MaxValue;
+            foreach (var subj in s.Subjects)
+            {
+                var d = DaysLeft(subj, DateTime.Today);
+                if (d.HasValue && d.Value < daysLeft) { best = subj; daysLeft = d.Value; }
+            }
+            return best;
+        }
+
         // First subject that still has pomodoros left today (keeps the preferred one if it does).
+        // Subjects with the nearest deadline come first, then the plan order.
         public static Subject NextPending(AppSettings s, SessionStore store, string preferId)
         {
-            var rows = Today(s, store).Where(r => r.Done < r.Target).ToList();
+            var rows = Today(s, store).Where(r => r.Done < r.Target)
+                                      .OrderBy(r => r.DaysLeft.HasValue ? r.DaysLeft.Value : int.MaxValue).ToList();
             var keep = rows.FirstOrDefault(r => r.Subject.Id == preferId);
             if (keep != null) return keep.Subject;
             return rows.Count > 0 ? rows[0].Subject : null;

@@ -43,6 +43,7 @@ namespace Fokkus
         readonly TodayPlanView plan;
         readonly Filter[] quickFilters = { Filter.AllowSites, Filter.BlockSites, Filter.AllowApps, Filter.BlockApps };
         readonly QuickToggle[] quick = new QuickToggle[4];
+        readonly FlatButton btnProfile;
         string lastKey;
 
         static string QuickName(Filter f)
@@ -60,6 +61,9 @@ namespace Fokkus
         {
             Header("Focus timer", "");
             Button("Mini timer", Glyph.Minimize, Width - Pad - S(150), S(28), S(150), S(36), (s, e) => Ctx.SwitchToMini());
+            // Session profile: one click sets all four blocking functions (+ strict mode).
+            btnProfile = Button("Profile", Glyph.Shield, Width - Pad - S(150) - S(10) - S(220), S(28), S(220), S(36), (s, e) => ShowProfileMenu());
+            new ToolTip().SetToolTip(btnProfile, "Session profile: switches the blocking functions in one go");
 
             int leftW = S(420), cx = Pad + leftW / 2;
             int rs = S(300);
@@ -93,6 +97,18 @@ namespace Fokkus
             plan = Place(new TodayPlanView(), rx, S(348), rw, S(204));
             plan.SubjectClicked += subj => Ctx.SelectSubject(subj.Id);
             Button("Edit plan", Glyph.Calendar, rx, S(560), rw, S(36), (s, e) => Ctx.OpenPage(1));
+        }
+
+        void ShowProfileMenu()
+        {
+            var m = new ContextMenuStrip();
+            m.Renderer = new DarkMenuRenderer();
+            m.Font = Theme.F(10);
+            m.ShowCheckMargin = true;
+            m.ShowImageMargin = false;
+            Ctx.FillProfileMenu(m.Items);
+            m.Closed += (a, b) => BeginInvoke(new Action(m.Dispose));
+            m.Show(btnProfile, new Point(0, btnProfile.Height + S(2)));
         }
 
         void ShowSubjectMenu()
@@ -182,6 +198,7 @@ namespace Fokkus
             subject.Subject = Planner.Active(s);
             subject.Invalidate();
             for (int i = 0; i < quick.Length; i++) quick[i].SetChecked(s.IsOn(quickFilters[i]));
+            btnProfile.Text = "Profile: " + Ctx.ProfileLabel;
             plan.SetRows(Planner.Today(s, Ctx.Sessions), s.ActiveSubjectId);
             lastKey = null;
             OnTick();
@@ -224,7 +241,7 @@ namespace Fokkus
         const int MaxSubjects = 10;
         readonly PlanGrid grid;
         readonly TextInput input;
-        readonly FlatButton btnRename, btnRemove, btnUp, btnDown;
+        readonly FlatButton btnRename, btnRemove, btnUp, btnDown, btnDeadline;
         readonly Label info;
         readonly Toggle autoNext;
 
@@ -232,13 +249,19 @@ namespace Fokkus
         {
             Header("Study plan", "Pomodoros per subject for each weekday. Click a cell to add one, right-click (or scroll) to remove one.");
             int full = Width - 2 * Pad;
-            input = Place(new TextInput("New subject, e.g. Linear Algebra"), Pad, S(96), S(260), TextInput.PreferredHeightNow);
+            input = Place(new TextInput("New subject, e.g. Linear Algebra"), Pad, S(96), S(236), TextInput.PreferredHeightNow);
             input.Submitted += (s, e) => AddSubject();
-            Button("Add", Glyph.Add, Pad + S(268), S(96), S(82), S(36), (s, e) => AddSubject());
-            btnRename = Button("Rename", Glyph.Edit, Pad + S(358), S(96), S(104), S(36), (s, e) => Rename());
-            btnUp = Button("", Glyph.Up, Pad + S(470), S(96), S(38), S(36), (s, e) => MoveSelected(-1));
-            btnDown = Button("", Glyph.Down, Pad + S(514), S(96), S(38), S(36), (s, e) => MoveSelected(1));
-            btnRemove = Button("Remove", Glyph.Delete, Width - Pad - S(112), S(96), S(112), S(36), (s, e) => Remove());
+            Button("Add", Glyph.Add, Pad + S(244), S(96), S(76), S(36), (s, e) => AddSubject());
+            btnRename = Button("Rename", Glyph.Edit, Pad + S(328), S(96), S(100), S(36), (s, e) => Rename());
+            btnDeadline = Button("Deadline", Glyph.Calendar, Pad + S(436), S(96), S(112), S(36), (s, e) => EditDeadline());
+            btnUp = Button("", Glyph.Up, Width - Pad - S(120), S(96), S(36), S(36), (s, e) => MoveSelected(-1));
+            btnDown = Button("", Glyph.Down, Width - Pad - S(78), S(96), S(36), S(36), (s, e) => MoveSelected(1));
+            btnRemove = Button("", Glyph.Delete, Width - Pad - S(36), S(96), S(36), S(36), (s, e) => Remove());
+            var tips = new ToolTip();
+            tips.SetToolTip(btnDeadline, "Exam or due date for the selected subject");
+            tips.SetToolTip(btnUp, "Move up");
+            tips.SetToolTip(btnDown, "Move down");
+            tips.SetToolTip(btnRemove, "Remove the selected subject");
 
             grid = Place(new PlanGrid(), Pad, S(148), full, S(200));
             grid.Settings = Ctx.Settings;
@@ -285,6 +308,13 @@ namespace Fokkus
             Save();
         }
 
+        void EditDeadline()
+        {
+            var s = Selected;
+            if (s == null) return;
+            if (Dialogs.EditDeadline(FindForm(), s)) { Save(); Ctx.PlanChanged(); }
+        }
+
         void MoveSelected(int dir)
         {
             var s = Selected;
@@ -314,6 +344,7 @@ namespace Fokkus
         {
             bool sel = Selected != null;
             btnRename.Enabled = sel;
+            btnDeadline.Enabled = sel;
             btnRemove.Enabled = sel;
             btnUp.Enabled = sel;
             btnDown.Enabled = sel;

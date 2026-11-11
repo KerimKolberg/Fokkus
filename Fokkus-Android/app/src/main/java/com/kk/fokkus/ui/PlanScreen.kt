@@ -48,10 +48,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.app.DatePickerDialog
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalContext
 import com.kk.fokkus.R
 import com.kk.fokkus.data.AppSettings
 import com.kk.fokkus.data.Analytics
 import com.kk.fokkus.data.Planner
+import com.kk.fokkus.data.Profile
+import java.time.format.DateTimeFormatter
 import com.kk.fokkus.data.SettingsStore
 import com.kk.fokkus.data.Subject
 import com.kk.fokkus.data.SubjectColors
@@ -145,8 +153,9 @@ fun PlanScreen() {
     val editing = s.subjects.firstOrNull { it.id == editingId }
     if (editing != null) EditSubjectDialog(
         subject = editing,
+        profiles = s.profiles,
         onDismiss = { editingId = null },
-        onRename = { name -> save { st -> st.copy(subjects = st.subjects.map { if (it.id == editing.id) it.copy(name = name) else it }) } },
+        onSave = { updated -> save { st -> st.copy(subjects = st.subjects.map { if (it.id == editing.id) updated else it }) } },
         onMove = { dir ->
             save { st ->
                 val list = st.subjects.toMutableList()
@@ -172,8 +181,14 @@ private fun SubjectPlanCard(sub: Subject, focusMin: Int, todayIdx: Int, onBump: 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(c))
                 Spacer(Modifier.width(10.dp))
-                Text(sub.name, color = Palette.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text(sub.name, color = Palette.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    Planner.daysLeft(sub)?.let { d ->
+                        Text(Planner.deadlineText(sub, d), fontSize = 12.sp,
+                            color = when { d <= 3 -> Palette.Warn; d <= 7 -> Palette.ShortBreak; else -> Palette.Muted })
+                    }
+                }
                 Text(if (week > 0) "$week · ${Analytics.compact(week * focusMin.toDouble())}/week" else "not planned",
                     color = Palette.Muted, fontSize = 12.sp)
                 Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).clickable { onEdit() }, contentAlignment = Alignment.Center) {
@@ -229,20 +244,57 @@ private fun WeekTotals(s: AppSettings, todayIdx: Int) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EditSubjectDialog(subject: Subject, onDismiss: () -> Unit, onRename: (String) -> Unit, onMove: (Int) -> Unit, onDelete: () -> Unit) {
+private fun EditSubjectDialog(
+    subject: Subject, profiles: List<Profile>, onDismiss: () -> Unit, onSave: (Subject) -> Unit, onMove: (Int) -> Unit, onDelete: () -> Unit,
+) {
+    val ctx = LocalContext.current
     var name by remember(subject.id) { mutableStateOf(subject.name) }
+    var deadline by remember(subject.id) { mutableStateOf(subject.deadlineDate) }
+    var label by remember(subject.id) { mutableStateOf(subject.deadlineLabel.orEmpty()) }
+    var profileId by remember(subject.id) { mutableStateOf(subject.profileId) }
     var confirmDelete by remember(subject.id) { mutableStateOf(false) }
+    val fieldColors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Palette.Focus, unfocusedBorderColor = Palette.Border)
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Palette.Surface,
         title = { Text("Edit subject", color = Palette.Text) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
-                    value = name, onValueChange = { name = it.take(40) }, singleLine = true, label = { Text("Name") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Palette.Focus, unfocusedBorderColor = Palette.Border),
+                    value = name, onValueChange = { name = it.take(40) }, singleLine = true, label = { Text("Name") }, colors = fieldColors,
                 )
+
+                // Deadline: exam / due date. Close to it, today's plan suggests extra pomodoros.
+                Text("Deadline", color = Palette.Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        val d = deadline ?: LocalDate.now().plusDays(14)
+                        DatePickerDialog(ctx, { _, y, m, day -> deadline = LocalDate.of(y, m + 1, day) }, d.year, d.monthValue - 1, d.dayOfMonth).show()
+                    }) {
+                        IconRes(R.drawable.ic_calendar, Palette.Focus, 18.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(deadline?.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy")) ?: "Set a date", color = Palette.Focus)
+                    }
+                    if (deadline != null) TextButton(onClick = { deadline = null }) { Text("Remove", color = Palette.Muted) }
+                }
+                if (deadline != null) OutlinedTextField(
+                    value = label, onValueChange = { label = it.take(20) }, singleLine = true, label = { Text("What is it? e.g. Exam") },
+                    colors = fieldColors,
+                )
+
+                // Profile switched on automatically when you study this subject.
+                Text("Profile when studying it", color = Palette.Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (listOf<Profile?>(null) + profiles).forEach { p ->
+                        val sel = profileId == p?.id
+                        Box(
+                            Modifier.clip(RoundedCornerShape(10.dp)).background(if (sel) Palette.Focus else Palette.Surface2)
+                                .clickable { profileId = p?.id }.padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) { Text(p?.name ?: "None", fontSize = 13.sp, color = if (sel) Palette.OnAccent else Palette.Text) }
+                    }
+                }
                 Row(Modifier.padding(top = 8.dp)) {
                     TextButton(onClick = { onMove(-1) }) {
                         IconRes(R.drawable.ic_arrow_up, Palette.Text, 18.dp); Spacer(Modifier.width(4.dp)); Text("Move up", color = Palette.Text)
@@ -259,7 +311,12 @@ private fun EditSubjectDialog(subject: Subject, onDismiss: () -> Unit, onRename:
         },
         confirmButton = {
             TextButton(onClick = {
-                if (name.isNotBlank()) onRename(name.trim())
+                onSave(subject.copy(
+                    name = name.trim().ifEmpty { subject.name },
+                    deadline = deadline?.toString(),
+                    deadlineLabel = label.trim().ifEmpty { null }.takeIf { deadline != null },
+                    profileId = profileId,
+                ))
                 onDismiss()
             }) { Text("Save", color = Palette.Focus) }
         },

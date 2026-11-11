@@ -10,6 +10,65 @@ import java.time.LocalDate
 
 enum class TimerDisplay { NOTIFICATION, FLOATING, BOTH }
 
+/** A saved combination of the four blocking functions + strict mode ("Programming", "Exam prep"...). */
+data class Profile(
+    val id: String,
+    val name: String,
+    val allowSitesOn: Boolean,
+    val blockSitesOn: Boolean,
+    val allowAppsOn: Boolean,
+    val blockAppsOn: Boolean,
+    val strict: Boolean,
+) {
+    fun matches(s: AppSettings) = s.allowSitesOn == allowSitesOn && s.blockSitesOn == blockSitesOn &&
+        s.allowAppsOn == allowAppsOn && s.blockAppsOn == blockAppsOn && s.strictMode == strict
+
+    /** Switching from the current settings to this profile would loosen the lock. */
+    fun loosens(s: AppSettings) = (s.allowSitesOn && !allowSitesOn) || (s.blockSitesOn && !blockSitesOn) ||
+        (s.allowAppsOn && !allowAppsOn) || (s.blockAppsOn && !blockAppsOn) || (s.strictMode && !strict)
+
+    fun applyTo(s: AppSettings) = s.copy(
+        allowSitesOn = allowSitesOn, blockSitesOn = blockSitesOn, allowAppsOn = allowAppsOn, blockAppsOn = blockAppsOn,
+        strictMode = strict, activeProfileId = id,
+    )
+
+    fun describe(): String {
+        val on = listOfNotNull(
+            "allowed websites".takeIf { allowSitesOn }, "blocked websites".takeIf { blockSitesOn },
+            "allowed apps".takeIf { allowAppsOn }, "blocked apps".takeIf { blockAppsOn },
+        )
+        return (if (on.isEmpty()) "No blocking" else on.joinToString(", ")) + if (strict) " · strict" else ""
+    }
+
+    companion object {
+        fun capture(name: String, s: AppSettings, id: String = java.util.UUID.randomUUID().toString().take(10)) =
+            Profile(id, name, s.allowSitesOn, s.blockSitesOn, s.allowAppsOn, s.blockAppsOn, s.strictMode)
+
+        // On the phone "Allowed apps" is the usual lock (everything else is locked).
+        val defaults = listOf(
+            Profile("study", "Study", allowSitesOn = true, blockSitesOn = false, allowAppsOn = true, blockAppsOn = false, strict = false),
+            Profile("coding", "Programming", allowSitesOn = false, blockSitesOn = true, allowAppsOn = false, blockAppsOn = true, strict = false),
+            Profile("exam", "Exam prep", allowSitesOn = true, blockSitesOn = true, allowAppsOn = true, blockAppsOn = true, strict = true),
+            Profile("timer", "Just the timer", allowSitesOn = false, blockSitesOn = false, allowAppsOn = false, blockAppsOn = false, strict = false),
+        )
+    }
+}
+
+/** The profile describing the current switches (the last applied one first), or null = custom. */
+fun AppSettings.currentProfile(): Profile? =
+    profiles.firstOrNull { it.id == activeProfileId && it.matches(this) } ?: profiles.firstOrNull { it.matches(this) }
+
+/**
+ * Picks the subject you study and switches on its profile, if it has one
+ * (unless that would loosen the lock during a strict session).
+ */
+fun AppSettings.withSubject(id: String?, strictLocked: Boolean): AppSettings {
+    val next = copy(activeSubjectId = id)
+    val p = subjects.firstOrNull { it.id == id }?.profileId?.let { pid -> profiles.firstOrNull { it.id == pid } } ?: return next
+    if (p.matches(next) || (strictLocked && p.loosens(next))) return next
+    return p.applyTo(next)
+}
+
 /** Ready-made timer rhythms (shortcuts in Settings). */
 data class Rhythm(val name: String, val focus: Int, val shortBreak: Int, val longBreak: Int, val sessions: Int) {
     fun applyTo(s: AppSettings) = s.copy(focusMin = focus, shortBreakMin = shortBreak, longBreakMin = longBreak, sessionsBeforeLong = sessions)
@@ -59,6 +118,9 @@ data class AppSettings(
     val activeSubjectId: String? = null,
     val autoNextSubject: Boolean = true,
     val planSince: String? = null, // yyyy-MM-dd: plan targets count from this day on
+    // session profiles
+    val profiles: List<Profile> = Profile.defaults,
+    val activeProfileId: String? = null,
     val settingsVersion: Int = CURRENT_VERSION,
 ) {
     val anySiteFilter: Boolean get() = allowSitesOn || blockSitesOn
@@ -120,9 +182,18 @@ object SettingsStore {
         put("sound", s.sound); put("bubbleX", s.bubbleX); put("bubbleY", s.bubbleY); put("appsInitialized", s.appsInitialized)
         put("subjects", JSONArray().apply {
             s.subjects.forEach { sub ->
-                put(JSONObject().put("id", sub.id).put("name", sub.name).put("color", sub.colorIndex).put("targets", JSONArray(sub.targets)))
+                put(JSONObject().put("id", sub.id).put("name", sub.name).put("color", sub.colorIndex).put("targets", JSONArray(sub.targets))
+                    .put("deadline", sub.deadline ?: JSONObject.NULL).put("deadlineLabel", sub.deadlineLabel ?: JSONObject.NULL)
+                    .put("profileId", sub.profileId ?: JSONObject.NULL))
             }
         })
+        put("profiles", JSONArray().apply {
+            s.profiles.forEach { p ->
+                put(JSONObject().put("id", p.id).put("name", p.name).put("allowSites", p.allowSitesOn).put("blockSites", p.blockSitesOn)
+                    .put("allowApps", p.allowAppsOn).put("blockApps", p.blockAppsOn).put("strict", p.strict))
+            }
+        })
+        put("activeProfileId", s.activeProfileId ?: JSONObject.NULL)
         put("settingsVersion", s.settingsVersion)
         put("activeSubjectId", s.activeSubjectId ?: JSONObject.NULL)
         put("autoNextSubject", s.autoNextSubject)
@@ -135,7 +206,25 @@ object SettingsStore {
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val t = o.optJSONArray("targets")
             val targets = List(7) { d -> (t?.optInt(d, 0) ?: 0).coerceIn(0, 16) }
-            Subject(o.optString("id"), o.optString("name", "Subject"), o.optInt("color", 8), targets)
+            Subject(
+                o.optString("id"), o.optString("name", "Subject"), o.optInt("color", 8), targets,
+                deadline = o.optNullable("deadline")?.takeIf { d -> runCatching { java.time.LocalDate.parse(d) }.isSuccess },
+                deadlineLabel = o.optNullable("deadlineLabel"),
+                profileId = o.optNullable("profileId"),
+            )
+        }.filter { it.id.isNotEmpty() }
+    }
+
+    private fun JSONObject.optNullable(key: String): String? = if (isNull(key)) null else optString(key).ifEmpty { null }
+
+    private fun JSONObject.profiles(): List<Profile> {
+        val arr = optJSONArray("profiles") ?: return Profile.defaults
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            Profile(
+                o.optString("id"), o.optString("name", "Profile").ifBlank { "Profile" },
+                o.optBoolean("allowSites"), o.optBoolean("blockSites"), o.optBoolean("allowApps"), o.optBoolean("blockApps"), o.optBoolean("strict"),
+            )
         }.filter { it.id.isNotEmpty() }
     }
 
@@ -178,6 +267,8 @@ object SettingsStore {
             appsInitialized = o.optBoolean("appsInitialized", false),
             subjects = o.subjects(),
             activeSubjectId = if (o.isNull("activeSubjectId")) null else o.optString("activeSubjectId").ifEmpty { null },
+            profiles = o.profiles(),
+            activeProfileId = o.optNullable("activeProfileId"),
             autoNextSubject = o.optBoolean("autoNextSubject", true),
             planSince = if (o.isNull("planSince")) null else o.optString("planSince").ifEmpty { null },
             settingsVersion = o.optInt("settingsVersion", 1),
