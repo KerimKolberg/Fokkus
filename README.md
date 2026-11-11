@@ -6,7 +6,7 @@ A Pomodoro study app for **Windows** and **Android**. Plan your week per subject
 Fokkus-Windows/   – C# source, build.cmd, installer/ (Inno Setup script)
 Fokkus-Android/   – Kotlin / Jetpack Compose project (open in Android Studio)
 dist/             – build output (not in git):
-  Fokkus-Setup-1.3.0.exe – Windows installer
+  Fokkus-Setup-1.3.1.exe – Windows installer
   Fokkus.exe             – Windows app, portable (no install)
   Fokkus.apk             – Android app (sideload)
 ```
@@ -60,7 +60,7 @@ Example: for a programming session where you only want to keep social media & co
 
 ## Windows
 
-**Install:** run `Fokkus-Setup-1.3.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
+**Install:** run `Fokkus-Setup-1.3.1.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
 - a desktop shortcut and a Start menu entry
 - an entry in *Settings → Apps*, from where you can uninstall. The uninstaller asks whether to keep your plan and statistics.
 
@@ -73,6 +73,7 @@ Fokkus lives in the system tray and shows a small timer you can drag anywhere.
 - **Tray icon**: a ring that shrinks as time passes (teal = focus, amber = short break, violet = long break). Left-click opens Fokkus; right-click opens the menu.
 - **Mini timer**: drag to move, double-click to open, hover for ▶/⏸, skip and open. It shows the subject, and for a few seconds now and then a motivation line. It repairs itself if it gets lost: after *Show desktop*, a virtual-desktop switch, sleep, the lock screen or a monitor change it comes back on its own.
 - **Space** starts or pauses the timer on the Timer page.
+- **Minimize**: by default the window goes to the tray. Turn off *Settings → Minimizing hides it in the tray* to minimize to the taskbar like any other window.
 
 ### How website blocking works
 During focus, Fokkus runs a tiny filter on `127.0.0.1` and points the Windows proxy setting at it. Chrome, Edge, Brave and Opera use that setting, and so does Firefox with "Use system proxy settings". Allowed sites skip the filter entirely. Blocked `https://` pages show a connection error, plus a Fokkus pop-up. If a site you need breaks, allow it from **Websites → Recently blocked**. Nothing is decrypted or logged; only host names are checked.
@@ -89,7 +90,7 @@ Fokkus.exe --restore-internet
 ```bash
 winget install JRSoftware.InnoSetup
 ```
-`Fokkus.exe --selftest out.txt` runs 48 built-in tests (all four filter combinations, the live proxy, plan and statistics math).
+`Fokkus.exe --selftest out.txt` runs 49 built-in tests (all four filter combinations, the live proxy, plan and statistics math).
 
 Data lives in `%APPDATA%\Fokkus\`:
 - `settings.json`

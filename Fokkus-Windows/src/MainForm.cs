@@ -184,7 +184,7 @@ namespace Fokkus
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            if (WindowState == FormWindowState.Minimized && ctx.Settings.CloseToTray)
+            if (WindowState == FormWindowState.Minimized && ctx.Settings.MinimizeToTray)
             {
                 Hide();
                 WindowState = FormWindowState.Normal;

@@ -167,7 +167,7 @@ namespace Fokkus
     class SettingsPage : Page
     {
         readonly Stepper focus, shortBreak, longBreak, sessions, opacity;
-        readonly Toggle autoBreaks, autoFocus, strict, sound, autostart, closeToTray;
+        readonly Toggle autoBreaks, autoFocus, strict, sound, autostart, closeToTray, minimizeToTray;
         readonly Segmented miniMode;
         readonly FlatButton[] rhythms = new FlatButton[Rhythm.All.Length];
         readonly Label rhythmHint;
@@ -208,12 +208,14 @@ namespace Fokkus
             sound = AddToggle("Play a chime when a phase ends", null, rx, S(250), rw, (s, e) => { Ctx.Settings.SoundEnabled = sound.Checked; Save(); });
             autostart = AddToggle("Start with Windows (in the tray)", null, rx, S(288), rw, (s, e) => { Ctx.Settings.StartWithWindows = autostart.Checked; Save(); });
             closeToTray = AddToggle("Closing the window keeps it in the tray", null, rx, S(326), rw, (s, e) => { Ctx.Settings.CloseToTray = closeToTray.Checked; Save(); });
+            minimizeToTray = AddToggle("Minimizing hides it in the tray", "Off: minimize to the taskbar like any other window.", rx, S(364), rw,
+                (s, e) => { Ctx.Settings.MinimizeToTray = minimizeToTray.Checked; Save(); });
 
-            Section("Safety", rx, S(378), rw);
-            Button("Restore internet settings", Glyph.Refresh, rx, S(404), S(250), S(38), (s, e) => Ctx.RestoreInternet());
+            Section("Safety", rx, S(430), rw);
+            Button("Restore internet settings", Glyph.Refresh, rx, S(456), S(250), S(38), (s, e) => Ctx.RestoreInternet());
             AddLabel("If websites ever stay blocked after Fokkus closed unexpectedly, click this (or run the app once — it repairs itself on start).",
-                Theme.F(8.5f), Theme.Muted, rx, S(448), rw, S(52));
-            Button("Open data folder", Glyph.Folder, rx, S(510), S(250), S(38), (s, e) =>
+                Theme.F(8.5f), Theme.Muted, rx, S(500), rw, S(52));
+            Button("Open data folder", Glyph.Folder, rx, S(560), S(250), S(38), (s, e) =>
             {
                 try { Process.Start("explorer.exe", "\"" + AppSettings.Dir + "\""); } catch { }
             });
@@ -264,6 +266,7 @@ namespace Fokkus
             sound.SetSilently(s.SoundEnabled);
             autostart.SetSilently(s.StartWithWindows);
             closeToTray.SetSilently(s.CloseToTray);
+            minimizeToTray.SetSilently(s.MinimizeToTray);
         }
     }
 }

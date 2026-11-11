@@ -3,7 +3,7 @@
 ; Start menu entry, desktop shortcut, entry in Settings > Apps for uninstalling.
 
 #define AppName "Fokkus"
-#define AppVersion "1.3.0"
+#define AppVersion "1.3.1"
 #define AppExe "Fokkus.exe"
 #define AppUrl "https://github.com/KerimKolberg/Fokkus"
 

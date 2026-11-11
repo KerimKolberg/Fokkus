@@ -77,6 +77,11 @@ namespace Fokkus
             v3.Upgrade();
             check("upgrade: YouTube moves from blocked to allowed", HostRules.From(v3).IsAllowed("music.youtube.com") && HostRules.From(v3).IsAllowed("i.ytimg.com") &&
                   !HostRules.From(v3).IsAllowed("www.netflix.com"));
+            var v4 = new AppSettings();
+            v4.SettingsVersion = 4;
+            v4.CloseToTray = false;
+            v4.Upgrade();
+            check("upgrade: minimizing keeps its old behavior", !v4.MinimizeToTray && new AppSettings().MinimizeToTray);
             check("timer rhythms", Rhythm.Matching(new AppSettings()) == Rhythm.All[0] && Rhythm.All.Select(r => r.Focus).SequenceEqual(new[] { 25, 45, 90 }));
 
             // Allowed apps

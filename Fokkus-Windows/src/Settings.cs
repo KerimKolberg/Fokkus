@@ -80,7 +80,7 @@ namespace Fokkus
         public List<string> DisabledApps { get; set; }
 
         // Bumped when defaults change, so existing settings get the new defaults once.
-        public const int CurrentVersion = 4;
+        public const int CurrentVersion = 5;
         public int SettingsVersion { get; set; }
 
         public bool IsOn(Filter f)
@@ -123,6 +123,7 @@ namespace Fokkus
         public int MiniY { get; set; }
         public bool StartWithWindows { get; set; }
         public bool CloseToTray { get; set; }
+        public bool MinimizeToTray { get; set; }   // minimize hides the window in the tray instead of the taskbar
 
         public AppSettings()
         {
@@ -165,6 +166,7 @@ namespace Fokkus
             MiniY = -1;
             StartWithWindows = false;
             CloseToTray = true;
+            MinimizeToTray = true;
         }
 
         static bool migrated;
@@ -248,6 +250,8 @@ namespace Fokkus
                     foreach (var item in p.Items)
                         if (!Has(AllowedSites, item)) AllowedSites.Add(item);
             }
+            // v5: minimizing has its own setting; it used to follow "Closing the window keeps it in the tray".
+            if (SettingsVersion < 5) MinimizeToTray = CloseToTray;
             SettingsVersion = CurrentVersion;
         }
 
