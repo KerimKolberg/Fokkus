@@ -44,8 +44,8 @@ namespace Fokkus
             host.SetBounds(Theme.S(220), 0, ClientSize.Width - Theme.S(220), ClientSize.Height);
             Controls.Add(host);
 
-            string[] names = { "Timer", "Plan", "Statistics", "Websites", "Apps", "Tips", "Settings" };
-            string[] glyphs = { Glyph.Timer, Glyph.Calendar, Glyph.Chart, Glyph.Globe, Glyph.Apps, Glyph.Bulb, Glyph.Settings };
+            string[] names = { "Timer", "Plan", "Statistics", "Websites", "Apps", "Tips", "Sync & data", "Settings" };
+            string[] glyphs = { Glyph.Timer, Glyph.Calendar, Glyph.Chart, Glyph.Globe, Glyph.Apps, Glyph.Bulb, Glyph.Refresh, Glyph.Settings };
             for (int i = 0; i < names.Length; i++)
             {
                 int index = i;
@@ -72,6 +72,7 @@ namespace Fokkus
             pages.Add(new WebsitesPage(ctx, pageSize));
             pages.Add(new AppsPage(ctx, pageSize));
             pages.Add(new TipsPage(ctx, pageSize));
+            pages.Add(new DataPage(ctx, pageSize));
             pages.Add(new SettingsPage(ctx, pageSize));
             foreach (var p in pages)
             {

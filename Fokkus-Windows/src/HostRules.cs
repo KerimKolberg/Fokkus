@@ -29,7 +29,8 @@ namespace Fokkus
 
         public static HostRules From(AppSettings s)
         {
-            return new HostRules(s.AllowSitesOn, s.AllowedSites, s.BlockSitesOn, s.BlockedSites);
+            // The focus-music stream always gets through while it's switched on.
+            return new HostRules(s.AllowSitesOn, s.AllowedSites.Concat(Stations.Hosts(s)), s.BlockSitesOn, s.BlockedSites);
         }
 
         // Anything to filter at all?

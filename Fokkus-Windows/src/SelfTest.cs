@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -12,6 +13,7 @@ namespace Fokkus
     {
         public static int Run(string outFile)
         {
+            AppSettings.ReadOnly = true;   // the tests never touch your real settings
             var sb = new StringBuilder();
             int failed = 0;
             Action<string, bool> check = (name, ok) =>
@@ -109,6 +111,104 @@ namespace Fokkus
             check("deadlines: nearest deadline first", Planner.NextPending(ds, dstore, null) == subjB && Planner.NextPending(ds, dstore, subjA.Id) == subjA);
             int dleft;
             check("deadlines: next deadline", Planner.NextDeadline(ds, out dleft) == subjB && dleft == 2 && Planner.DeadlineText(subjB, 2) == "Deadline in 2 days");
+
+            // Notes + joining statistics (sync / restore)
+            var st1 = new SessionStore { ReadOnly = true };
+            var recA = new FocusRecord { StartMs = 1000000, Seconds = 1500, Pomodoros = 1 };
+            st1.Add(recA);
+            st1.SetNote(recA, "  Sheet 3 done ");
+            check("notes: saved", recA.Note == "Sheet 3 done" && recA.NoteMs > 0);
+            var st2 = new SessionStore { ReadOnly = true };
+            st2.Add(new FocusRecord { StartMs = 1000000, Seconds = 1500, Pomodoros = 1 });
+            st2.Add(new FocusRecord { StartMs = 2000000, Seconds = 600 });
+            int got = st2.Merge(st1.Records);
+            check("merge: newer note taken, no duplicates", got == 1 && st2.Records.Count == 2 && st2.Records[0].Note == "Sheet 3 done");
+            check("merge: missing records added", st1.Merge(st2.Records) == 1 && st1.Records.Count == 2);
+
+            // Sync between a PC and a phone that made their plans separately
+            var pc = new AppSettings();
+            var pcStore = new SessionStore { ReadOnly = true };
+            pc.SyncDeviceId = "win-test";
+            pc.Subjects.Add(new Subject { Id = "pc-ana", Name = "Analysis", ColorIndex = 0, Targets = Enumerable.Repeat(2, 7).ToList() });
+            pc.Subjects.Add(new Subject { Id = "pc-phy", Name = "Physics", ColorIndex = 1, Targets = Enumerable.Repeat(1, 7).ToList() });
+            pc.PlanUpdatedMs = 1000;
+            pcStore.Add(new FocusRecord { StartMs = 5000000, Seconds = 1500, SubjectId = "pc-ana", Pomodoros = 1 });
+            var doc = new SyncDoc();
+            var o1 = SyncMerge.Apply(pc, pcStore, doc, "PC", 2000);
+            check("sync: first device shares plan + stats", o1.PlanSent && o1.Sent == 1 && doc.plan.subjects.Count == 2 && doc.sessions.Count == 1);
+            var phone = new AppSettings();
+            var phStore = new SessionStore { ReadOnly = true };
+            phone.SyncDeviceId = "and-test";
+            phone.Subjects.Add(new Subject { Id = "ph-ana", Name = "analysis", ColorIndex = 0, Targets = Enumerable.Repeat(1, 7).ToList() });
+            phone.Subjects.Add(new Subject { Id = "ph-lin", Name = "Linear Algebra", ColorIndex = 1, Targets = Enumerable.Repeat(1, 7).ToList() });
+            phone.PlanUpdatedMs = 3000;
+            phStore.Add(new FocusRecord { StartMs = 6000000, Seconds = 1500, SubjectId = "ph-ana", Pomodoros = 1 });
+            var o2 = SyncMerge.Apply(phone, phStore, doc, "Phone", 4000);
+            check("sync: first sync joins plans by name", o2.PlansJoined && phone.Subjects.Count == 3 && phone.Subjects.Any(x => x.Id == "pc-ana") && phone.Subjects.Any(x => x.Name == "Linear Algebra"));
+            check("sync: records follow the joined subject", phStore.Records.Count == 2 && phStore.Records.All(r => r.SubjectId == "pc-ana"));
+            check("sync: subject colours stay unique", phone.Subjects.Select(x => x.ColorIndex).Distinct().Count() == 3);
+            var o3 = SyncMerge.Apply(pc, pcStore, doc, "PC", 5000);
+            check("sync: other device gets stats + newer plan", o3.Received == 1 && o3.PlanReceived && pc.Subjects.Count == 3 && pcStore.Records.Count == 2);
+            check("sync: nothing new = nothing written", !SyncMerge.Apply(pc, pcStore, doc, "PC", 6000).FileChanged);
+            var emptyPlan = new SyncDoc();
+            emptyPlan.plan = new SyncPlan { updated = 9999999, subjects = new List<SyncSubject>() };
+            var keep = new AppSettings();
+            keep.SyncDeviceId = "keep";
+            keep.Subjects.Add(new Subject { Name = "Keep me" });
+            keep.PlanUpdatedMs = 10;
+            SyncMerge.Apply(keep, new SessionStore { ReadOnly = true }, emptyPlan, "K", 20);
+            check("sync: an empty plan never wipes yours", keep.Subjects.Count == 1 && emptyPlan.plan.subjects.Count == 1);
+
+            // Smarter breaks
+            check("smart breaks", Breaks.Suggest(25, 5, 0) == 0 && Breaks.Suggest(60, 5, 0) == 15 && Breaks.Suggest(90, 20, 0) == 0 &&
+                                  Breaks.Suggest(25, 5, 2) == 10 && Breaks.Suggest(50, 10, 0) == 0);
+            var eng = new PomodoroEngine(() => new AppSettings());
+            eng.Start();
+            eng.SetPhaseLength(TimeSpan.FromMinutes(40));
+            check("longer phase", Math.Abs(eng.Remaining.TotalMinutes - 40) < 0.1 && Math.Abs(eng.Total.TotalMinutes - 40) < 0.01);
+
+            // Distraction insights
+            var dl = new DistractionLog { ReadOnly = true };
+            var at14 = DateTime.Today.AddHours(14);
+            dl.Add("site", "youtube.com", at14);
+            dl.Add("site", "youtube.com", at14.AddSeconds(20));
+            dl.Add("site", "youtube.com", at14.AddMinutes(5));
+            dl.Add("app", "Discord", at14.AddMinutes(6));
+            dl.Add("site", "reddit.com", DateTime.Today.AddHours(9));
+            var top = Insights.Top(dl, DateTime.Today, DateTime.Today.AddDays(1), 5);
+            check("insights: one attempt per minute", dl.Entries.Count == 4);
+            check("insights: top distraction + its hour", top.Count == 3 && top[0].Name == "youtube.com" && top[0].Count == 2 && top[0].PeakHour == 14);
+
+            // Weekly review
+            var rstore = new SessionStore { ReadOnly = true };
+            var lastMonday = Analytics.WeekStart(DateTime.Today).AddDays(-7);
+            rstore.Add(new FocusRecord { StartMs = SessionStore.ToUnixMs(lastMonday.AddHours(9)), Seconds = 3000, Pomodoros = 1, Note = "Sheet 1" });
+            rstore.Add(new FocusRecord { StartMs = SessionStore.ToUnixMs(lastMonday.AddDays(1).AddHours(10)), Seconds = 1500, Pomodoros = 1 });
+            var rev = Review.Compute(new AppSettings(), rstore, dl, lastMonday);
+            check("weekly review", Math.Abs(rev.Stats.TotalMinutes - 75) < 0.1 && rev.BestHour == 9 && rev.Notes.Count == 1 && rev.BestDay == lastMonday);
+            check("weekly review: which week", Review.DueWeek(new DateTime(2026, 11, 15, 19, 0, 0)) == new DateTime(2026, 11, 9) &&
+                                               Review.DueWeek(new DateTime(2026, 11, 11, 9, 0, 0)) == new DateTime(2026, 11, 2));
+
+            // Export + backup
+            var csvStore = new SessionStore { ReadOnly = true };
+            csvStore.Add(new FocusRecord { StartMs = SessionStore.ToUnixMs(new DateTime(2026, 11, 10, 9, 0, 0)), Seconds = 1500, Pomodoros = 1, SubjectId = "pc-ana", Note = "Sheet 3, \"task\" 2" });
+            string csv = Backup.Csv(pc, csvStore);
+            check("csv export", csv.StartsWith("date,start,end,minutes,subject,completed,note") &&
+                                csv.Contains("2026-11-10,09:00,09:25,25,Analysis,yes,\"Sheet 3, \"\"task\"\" 2\""));
+            var parsed = Backup.Parse(Backup.Create(pc, pcStore, dl));
+            check("backup round trip", parsed.Settings != null && parsed.Settings.Subjects.Count == pc.Subjects.Count &&
+                                       parsed.Sessions.Count == pcStore.Records.Count && parsed.Distractions.Count == dl.Entries.Count);
+            var target = new AppSettings();
+            target.SyncFolder = "keep-me";
+            int restored = Backup.Restore(parsed, target, new SessionStore { ReadOnly = true }, new DistractionLog { ReadOnly = true });
+            check("restore: settings + stats, keeps this PC's sync folder", restored == pcStore.Records.Count && target.Subjects.Count == pc.Subjects.Count && target.SyncFolder == "keep-me");
+
+            // Focus music
+            var wav = Noise.BrownNoiseWav(2, 8000);
+            check("brown noise file", wav.Length == 44 + 2 * 8000 * 2 && wav[0] == 'R' && wav[8] == 'W');
+            var ms = new AppSettings();
+            ms.MusicOn = true;
+            check("music stream gets through the website filter", HostRules.From(ms).IsAllowed("ice6.somafm.com") && !HostRules.From(new AppSettings()).IsAllowed("ice6.somafm.com"));
 
             check("timer rhythms", Rhythm.Matching(new AppSettings()) == Rhythm.All[0] && Rhythm.All.Select(r => r.Focus).SequenceEqual(new[] { 25, 45, 90 }));
 

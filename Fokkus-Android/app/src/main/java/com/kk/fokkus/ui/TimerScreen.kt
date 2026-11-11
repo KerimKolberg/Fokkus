@@ -205,6 +205,11 @@ fun TimerScreen(resumeTick: Int, requestNotifications: () -> Unit, onOpenPlan: (
             FilterQuick("Allowed", "apps", R.drawable.ic_apps, s.allowAppsOn, strict, Modifier.weight(1f)) { a, v -> a.copy(allowAppsOn = v) }
             FilterQuick("Blocked", "apps", R.drawable.ic_close, s.blockAppsOn, strict, Modifier.weight(1f)) { a, v -> a.copy(blockAppsOn = v) }
         }
+        MusicRow(s, Modifier.fillMaxWidth().padding(top = 10.dp))
+
+        // During the break: a longer break if it's earned, and "what did you finish?".
+        LongerBreakCard(st)
+        NoteCard(st, s)
 
         Spacer(Modifier.height(16.dp))
         TodayPlanCard(planRows, active, done, target, onSelect = select, onOpenPlan = onOpenPlan)

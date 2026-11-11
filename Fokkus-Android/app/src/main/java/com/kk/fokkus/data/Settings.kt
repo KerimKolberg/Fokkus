@@ -10,6 +10,9 @@ import java.time.LocalDate
 
 enum class TimerDisplay { NOTIFICATION, FLOATING, BOTH }
 
+/** An internet-radio stream you added yourself. */
+data class CustomStation(val name: String, val url: String)
+
 /** A saved combination of the four blocking functions + strict mode ("Programming", "Exam prep"...). */
 data class Profile(
     val id: String,
@@ -121,6 +124,21 @@ data class AppSettings(
     // session profiles
     val profiles: List<Profile> = Profile.defaults,
     val activeProfileId: String? = null,
+    // notes + smarter breaks
+    val askForNotes: Boolean = true,
+    val smartBreaks: Boolean = true,
+    // focus music (plays only while a focus phase runs)
+    val musicOn: Boolean = false,
+    val musicStation: String = "lofi",
+    val musicVolume: Int = 40,
+    val customStations: List<CustomStation> = emptyList(),
+    // weekly review: Monday (yyyy-MM-dd) of the last week that was offered
+    val lastReviewedWeek: String? = null,
+    // sync with the PC through a file in Google Drive / OneDrive
+    val syncUri: String? = null,
+    val deviceId: String = "",
+    val lastSyncMs: Long = 0L,
+    val planUpdatedMs: Long = 0L,   // when the study plan was last changed (the newest plan wins)
     val settingsVersion: Int = CURRENT_VERSION,
 ) {
     val anySiteFilter: Boolean get() = allowSitesOn || blockSitesOn
@@ -143,14 +161,29 @@ object SettingsStore {
         _state.value = load()
     }
 
+    @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
-        val next = transform(_state.value)
-        if (next == _state.value) return
+        val old = _state.value
+        var next = transform(old)
+        if (next == old) return
+        // Any change to the plan gets a timestamp, so the newest plan wins when syncing (sync sets its own).
+        if (next.planUpdatedMs == old.planUpdatedMs && planChanged(old, next)) next = next.copy(planUpdatedMs = System.currentTimeMillis())
         _state.value = next
         prefs.edit().putString("json", toJson(next).toString()).apply()
     }
 
+    private fun planChanged(a: AppSettings, b: AppSettings) =
+        a.subjects != b.subjects || a.planSince != b.planSince || a.autoNextSubject != b.autoNextSubject
+
     private fun load(): AppSettings {
+        val s = loadRaw()
+        if (s.deviceId.isNotEmpty()) return s
+        val withId = s.copy(deviceId = "and-" + java.util.UUID.randomUUID().toString().replace("-", "").take(8))
+        prefs.edit().putString("json", toJson(withId).toString()).apply()
+        return withId
+    }
+
+    private fun loadRaw(): AppSettings {
         val json = prefs.getString("json", null) ?: return AppSettings()
         val s = try { fromJson(JSONObject(json)) } catch (e: Exception) { return AppSettings() }
         if (s.settingsVersion >= AppSettings.CURRENT_VERSION) return s
@@ -169,7 +202,13 @@ object SettingsStore {
         return upgraded
     }
 
-    private fun toJson(s: AppSettings) = JSONObject().apply {
+    internal fun toJson(s: AppSettings) = JSONObject().apply {
+        put("askForNotes", s.askForNotes); put("smartBreaks", s.smartBreaks)
+        put("musicOn", s.musicOn); put("musicStation", s.musicStation); put("musicVolume", s.musicVolume)
+        put("customStations", JSONArray().apply { s.customStations.forEach { put(JSONObject().put("name", it.name).put("url", it.url)) } })
+        put("lastReviewedWeek", s.lastReviewedWeek ?: JSONObject.NULL)
+        put("syncUri", s.syncUri ?: JSONObject.NULL); put("deviceId", s.deviceId)
+        put("lastSyncMs", s.lastSyncMs); put("planUpdatedMs", s.planUpdatedMs)
         put("focusMin", s.focusMin); put("shortBreakMin", s.shortBreakMin); put("longBreakMin", s.longBreakMin)
         put("sessionsBeforeLong", s.sessionsBeforeLong); put("autoStartBreaks", s.autoStartBreaks)
         put("autoStartFocus", s.autoStartFocus); put("strictMode", s.strictMode)
@@ -233,8 +272,12 @@ object SettingsStore {
         return (0 until arr.length()).map { arr.getString(it) }
     }
 
-    private fun fromJson(o: JSONObject): AppSettings {
+    internal fun fromJson(o: JSONObject): AppSettings {
         val d = AppSettings()
+        val stations = o.optJSONArray("customStations")
+        val custom = if (stations == null) emptyList() else (0 until stations.length()).mapNotNull { i ->
+            stations.optJSONObject(i)?.let { CustomStation(it.optString("name"), it.optString("url")) }?.takeIf { it.url.isNotBlank() }
+        }
         // Saved by v1.0/1.1: one filter switch + mode, and per-site switches (switched-off sites are dropped).
         val webFilter = o.optBoolean("webFilter", true)
         val webAllowMode = o.optBoolean("webAllowMode", true)
@@ -271,6 +314,17 @@ object SettingsStore {
             activeProfileId = o.optNullable("activeProfileId"),
             autoNextSubject = o.optBoolean("autoNextSubject", true),
             planSince = if (o.isNull("planSince")) null else o.optString("planSince").ifEmpty { null },
+            askForNotes = o.optBoolean("askForNotes", d.askForNotes),
+            smartBreaks = o.optBoolean("smartBreaks", d.smartBreaks),
+            musicOn = o.optBoolean("musicOn", d.musicOn),
+            musicStation = o.optString("musicStation", d.musicStation).ifEmpty { d.musicStation },
+            musicVolume = o.optInt("musicVolume", d.musicVolume).coerceIn(0, 100),
+            customStations = custom,
+            lastReviewedWeek = o.optNullable("lastReviewedWeek"),
+            syncUri = o.optNullable("syncUri"),
+            deviceId = o.optString("deviceId", ""),
+            lastSyncMs = o.optLong("lastSyncMs", 0L),
+            planUpdatedMs = o.optLong("planUpdatedMs", 0L),
             settingsVersion = o.optInt("settingsVersion", 1),
         )
     }

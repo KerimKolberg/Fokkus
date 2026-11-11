@@ -6,10 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
+import com.kk.fokkus.data.Breaks
 import com.kk.fokkus.data.FocusRecord
 import com.kk.fokkus.data.Planner
 import com.kk.fokkus.data.SessionLog
 import com.kk.fokkus.data.SettingsStore
+import com.kk.fokkus.data.SyncManager
 import com.kk.fokkus.data.withSubject
 import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +29,7 @@ data class TimerState(
     val remainingMs: Long = 25 * 60_000L,
     val totalMs: Long = 25 * 60_000L,
     val completedInCycle: Int = 0,
+    val suggestMin: Int = 0,   // smarter breaks: a longer break is suggested for this break (0 = none)
 ) {
     fun remaining(now: Long = System.currentTimeMillis()): Long =
         if (run == RunState.RUNNING) (endAt - now).coerceAtLeast(0L) else remainingMs
@@ -105,9 +108,13 @@ object TimerEngine {
         if (current.run == RunState.RUNNING) pause() else start()
     }
 
+    /** Breaks skipped in a row: skipping again and again earns a nudge (and a longer break) next time. */
+    private var skippedBreaks = 0
+
     @Synchronized
     fun skip() {
         if (current.run == RunState.IDLE || strictLocked) return
+        if (current.phase != Phase.FOCUS) skippedBreaks++
         advance(natural = false, forceStart = current.run == RunState.RUNNING)
     }
 
@@ -115,9 +122,28 @@ object TimerEngine {
     fun stop() {
         if (strictLocked) return
         recordFocus(current, completed = false)
+        skippedBreaks = 0
         val t = durationOf(Phase.FOCUS)
         set(TimerState(remainingMs = t, totalMs = t))
     }
+
+    /** Changes the length of the current phase (e.g. a longer break); time already spent counts. */
+    @Synchronized
+    fun setPhaseLength(minutes: Int, start: Boolean = false) {
+        val s = current
+        if (s.run == RunState.IDLE) return
+        val now = System.currentTimeMillis()
+        val total = minutes * 60_000L
+        val left = (total - (s.totalMs - s.remaining(now))).coerceAtLeast(0L)
+        val running = s.run == RunState.RUNNING || start
+        set(s.copy(totalMs = total, remainingMs = left, endAt = if (running) now + left else 0L,
+            run = if (running) RunState.RUNNING else s.run, suggestMin = 0))
+    }
+
+    /** The key of the pomodoro that just ended (for its note). */
+    @Volatile
+    var lastCompletedKey: String? = null
+        private set
 
     /** Durations changed: refresh a phase that has not started yet. */
     @Synchronized
@@ -147,7 +173,10 @@ object TimerEngine {
         if (!completed && elapsed < 60_000L) return null
         val settings = SettingsStore.current
         val subject = Planner.active(settings)
-        SessionLog.add(FocusRecord(now - elapsed, (elapsed / 1000L).toInt(), subject?.id, if (completed) 1 else 0))
+        val rec = FocusRecord(now - elapsed, (elapsed / 1000L).toInt(), subject?.id, if (completed) 1 else 0)
+        SessionLog.add(rec)
+        if (completed) lastCompletedKey = rec.key
+        SyncManager.runSoon()
         if (!completed || subject == null) return null
         val today = LocalDate.now()
         val target = Planner.target(subject, today)
@@ -178,8 +207,16 @@ object TimerEngine {
         val auto = forceStart ?: if (next == Phase.FOCUS) settings.autoStartFocus else settings.autoStartBreaks
         val total = durationOf(next)
         val now = System.currentTimeMillis()
-        set(TimerState(next, if (auto) RunState.RUNNING else RunState.READY, if (auto) now + total else 0L, total, total, completed))
-        if (natural) Notifications.phaseCompleted(app, s.phase, next, auto, note)
+        if (natural && s.phase != Phase.FOCUS) skippedBreaks = 0   // a break taken in full
+        // Smarter breaks: a longer break after a long block (50+ min) or after skipping breaks.
+        val focusMin = (s.totalMs / 60_000L).toInt()
+        val longer = if (natural && s.phase == Phase.FOCUS && settings.smartBreaks) Breaks.suggest(focusMin, (total / 60_000L).toInt(), skippedBreaks) else 0
+        set(TimerState(next, if (auto) RunState.RUNNING else RunState.READY, if (auto) now + total else 0L, total, total, completed, longer))
+        if (natural) Notifications.phaseCompleted(
+            app, s.phase, next, auto, note,
+            noteKey = if (s.phase == Phase.FOCUS && settings.askForNotes) lastCompletedKey else null,
+            longer = longer, longerReason = if (longer > 0) Breaks.reason(focusMin, skippedBreaks) else null,
+        )
     }
 
     private fun set(n: TimerState) {
@@ -187,6 +224,7 @@ object TimerEngine {
         prefs.edit()
             .putString("phase", n.phase.name).putString("run", n.run.name).putLong("endAt", n.endAt)
             .putLong("remainingMs", n.remainingMs).putLong("totalMs", n.totalMs).putInt("completed", n.completedInCycle)
+            .putInt("suggestMin", n.suggestMin)
             .apply()
         onChanged()
     }
@@ -204,6 +242,7 @@ object TimerEngine {
             prefs.getLong("remainingMs", 25 * 60_000L),
             prefs.getLong("totalMs", 25 * 60_000L),
             prefs.getInt("completed", 0),
+            prefs.getInt("suggestMin", 0),
         )
     } catch (e: Exception) {
         TimerState()

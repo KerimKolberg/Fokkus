@@ -26,6 +26,7 @@ namespace Fokkus
             Targets = new List<int> { 0, 0, 0, 0, 0, 0, 0 };
         }
 
+        [ScriptIgnore]
         public DateTime? DeadlineDate
         {
             get
@@ -196,6 +197,27 @@ namespace Fokkus
         public bool CloseToTray { get; set; }
         public bool MinimizeToTray { get; set; }   // minimize hides the window in the tray instead of the taskbar
 
+        // Notes, smarter breaks, global shortcuts
+        public bool AskForNotes { get; set; }      // "what did you finish?" after each pomodoro
+        public bool SmartBreaks { get; set; }      // longer break after a long block or skipped breaks
+        public bool HotkeysEnabled { get; set; }   // Ctrl+Alt+F / S / T / O
+
+        // Focus music (plays only while a focus phase runs)
+        public bool MusicOn { get; set; }
+        public string MusicStation { get; set; }
+        public int MusicVolume { get; set; }
+        public List<CustomStation> CustomStations { get; set; }
+
+        // Weekly review: Monday (yyyy-MM-dd) of the last week that was offered
+        public string LastReviewedWeek { get; set; }
+
+        // Sync with the phone through a shared cloud folder
+        public string SyncFolder { get; set; }
+        public string SyncDeviceId { get; set; }
+        public long LastSyncMs { get; set; }
+        public long PlanUpdatedMs { get; set; }    // when the study plan was last changed (newest plan wins)
+        public string PlanSignature { get; set; }
+
         public AppSettings()
         {
             Subjects = new List<Subject>();
@@ -239,6 +261,14 @@ namespace Fokkus
             StartWithWindows = false;
             CloseToTray = true;
             MinimizeToTray = true;
+
+            AskForNotes = true;
+            SmartBreaks = true;
+            HotkeysEnabled = true;
+            MusicOn = false;
+            MusicStation = "lofi";
+            MusicVolume = 40;
+            CustomStations = new List<CustomStation>();
         }
 
         static bool migrated;
@@ -330,12 +360,30 @@ namespace Fokkus
         // Self-test / screenshot mode: never write the real settings file.
         public static bool ReadOnly;
 
+        // Fingerprint of everything that is synced as "the plan" (subjects, targets, deadlines, links).
+        public string ComputePlanSignature()
+        {
+            var sb = new StringBuilder();
+            sb.Append(PlanSince).Append('|').Append(AutoNextSubject);
+            foreach (var s in Subjects)
+                sb.Append('|').Append(s.Id).Append(',').Append(s.Name).Append(',').Append(s.ColorIndex).Append(',')
+                  .Append(string.Join(".", s.Targets)).Append(',').Append(s.Deadline).Append(',').Append(s.DeadlineLabel).Append(',').Append(s.ProfileId);
+            return sb.ToString();
+        }
+
         public void Save()
         {
-            if (ReadOnly) { Normalize(); return; }
+            Normalize();
+            // Any change to the plan gets a timestamp, so the newest plan wins when syncing.
+            string sig = ComputePlanSignature();
+            if (sig != PlanSignature)
+            {
+                PlanSignature = sig;
+                PlanUpdatedMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            }
+            if (ReadOnly) return;
             try
             {
-                Normalize();
                 string tmp = FilePath + ".tmp";
                 File.WriteAllText(tmp, new JavaScriptSerializer().Serialize(this), Encoding.UTF8);
                 if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
@@ -370,6 +418,11 @@ namespace Fokkus
             if (DisabledBlockedSites == null) DisabledBlockedSites = new List<string>();
             if (DisabledApps == null) DisabledApps = new List<string>();
             if (DisabledTipCategories == null) DisabledTipCategories = new List<string>();
+            MusicVolume = Clamp(MusicVolume, 0, 100);
+            if (string.IsNullOrEmpty(MusicStation)) MusicStation = "lofi";
+            if (CustomStations == null) CustomStations = new List<CustomStation>();
+            CustomStations.RemoveAll(c => c == null || string.IsNullOrWhiteSpace(c.Url));
+            if (string.IsNullOrEmpty(SyncDeviceId)) SyncDeviceId = "win-" + Guid.NewGuid().ToString("N").Substring(0, 8);
             if (Subjects == null) Subjects = new List<Subject>();
             foreach (var s in Subjects)
             {

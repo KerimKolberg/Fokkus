@@ -81,6 +81,9 @@ class TimerService : Service() {
         val s = SettingsStore.current
         val now = System.currentTimeMillis()
 
+        // Focus music: plays while a focus phase runs, pauses on breaks.
+        FocusMusic.update(this, st)
+
         // Tips: count focused time (ignore gaps when the phone slept).
         val phaseKey = "${st.phase}|${st.completedInCycle}|${st.totalMs}"
         if (phaseKey != lastPhaseKey) {
@@ -120,6 +123,7 @@ class TimerService : Service() {
 
     private fun shutdown() {
         handler.removeCallbacks(ticker)
+        FocusMusic.stop(this)
         floating?.hide()
         floating = null
         bubbleDismissed = false
@@ -130,6 +134,7 @@ class TimerService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(ticker)
+        FocusMusic.stop(this)
         floating?.hide()
         floating = null
         if (instance === this) instance = null

@@ -17,6 +17,18 @@ object Domains {
         return s
     }
 
+    /** Approximate registrable domain: "m.youtube.com" -> "youtube.com", "www.bbc.co.uk" -> "bbc.co.uk". */
+    fun baseDomain(host: String): String {
+        val h = host.lowercase().trimEnd('.').removePrefix("www.")
+        val parts = h.split('.')
+        if (parts.size <= 2 || h.all { it.isDigit() || it == '.' }) return h
+        val tld = parts[parts.size - 1]
+        val sld = parts[parts.size - 2]
+        val cc = tld.length == 2 && sld in setOf("co", "com", "ac", "org", "net", "gov", "edu")
+        val take = if (cc) 3 else 2
+        return if (parts.size <= take) h else parts.takeLast(take).joinToString(".")
+    }
+
     fun matches(host: String, rules: Collection<String>): Boolean {
         val h = host.lowercase().trimEnd('.')
         return rules.any { r -> h == r || h.endsWith(".$r") }

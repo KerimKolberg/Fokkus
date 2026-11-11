@@ -16,6 +16,8 @@ namespace Fokkus
         public int Seconds { get; set; }
         public string SubjectId { get; set; }
         public int Pomodoros { get; set; }     // 1 = completed, 0 = partial
+        public string Note { get; set; }       // "what did you finish?" (optional)
+        public long NoteMs { get; set; }       // when the note was written; the newest note wins when syncing
     }
 
     public class SessionStore
@@ -77,7 +79,61 @@ namespace Fokkus
             Save();
         }
 
-        void Save()
+        // Identifies a record across devices (sync, restore).
+        public static string KeyOf(FocusRecord r) { return r.StartMs + "|" + r.Seconds; }
+
+        public void SetNote(FocusRecord r, string note)
+        {
+            r.Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+            r.NoteMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            Save();
+        }
+
+        // Adds the records we don't have yet and takes newer notes. Returns how many records were added or updated.
+        public int Merge(IEnumerable<FocusRecord> incoming)
+        {
+            var byKey = new Dictionary<string, FocusRecord>();
+            foreach (var r in records) byKey[KeyOf(r)] = r;
+            int changed = 0;
+            foreach (var r in incoming)
+            {
+                if (r == null || r.Seconds <= 0) continue;
+                FocusRecord mine;
+                if (!byKey.TryGetValue(KeyOf(r), out mine))
+                {
+                    var copy = new FocusRecord { StartMs = r.StartMs, Seconds = r.Seconds, SubjectId = r.SubjectId, Pomodoros = r.Pomodoros, Note = r.Note, NoteMs = r.NoteMs };
+                    records.Add(copy);
+                    byKey[KeyOf(copy)] = copy;
+                    changed++;
+                }
+                else if (r.NoteMs > mine.NoteMs)
+                {
+                    mine.Note = r.Note;
+                    mine.NoteMs = r.NoteMs;
+                    changed++;
+                }
+            }
+            if (changed > 0)
+            {
+                records.Sort((a, b) => a.StartMs.CompareTo(b.StartMs));
+                Save();
+            }
+            return changed;
+        }
+
+        // Subject ids changed (e.g. two plans joined by name when syncing for the first time).
+        public void RemapSubjects(IDictionary<string, string> map)
+        {
+            if (map.Count == 0) return;
+            foreach (var r in records)
+            {
+                string to;
+                if (r.SubjectId != null && map.TryGetValue(r.SubjectId, out to)) r.SubjectId = to;
+            }
+            Save();
+        }
+
+        public void Save()
         {
             if (ReadOnly) return;
             try

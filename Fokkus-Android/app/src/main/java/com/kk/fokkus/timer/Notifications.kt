@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import com.kk.fokkus.MainActivity
 import com.kk.fokkus.R
 import com.kk.fokkus.data.Planner
@@ -147,7 +148,12 @@ object Notifications {
         return b.build()
     }
 
-    fun phaseCompleted(ctx: Context, from: Phase, to: Phase, autoStarted: Boolean, note: String? = null) {
+    const val KEY_NOTE = "note"
+
+    fun phaseCompleted(
+        ctx: Context, from: Phase, to: Phase, autoStarted: Boolean, note: String? = null,
+        noteKey: String? = null, longer: Int = 0, longerReason: String? = null,
+    ) {
         val s = SettingsStore.current
         val minutes = (TimerEngine.durationOf(to) / 60_000L).toInt()
         val title: String
@@ -173,6 +179,17 @@ object Notifications {
             text = "$note\n$text"
             FloatingTimer.message(note)
         }
+        // Smarter breaks: offer a longer one after a long block or skipped breaks.
+        var longerIntent: PendingIntent? = null
+        if (longer > 0 && to != Phase.FOCUS) {
+            text = "${longerReason ?: ""} Give your brain $longer minutes.\n$text".trim()
+            actionLabel = if (autoStarted) "Make it $longer min" else "Start $longer-min break"
+            longerIntent = PendingIntent.getBroadcast(
+                ctx, 21, Intent(ctx, TimerReceiver::class.java).setAction(TimerReceiver.ACTION_LONGER)
+                    .putExtra(TimerReceiver.EXTRA_MINUTES, longer).putExtra(TimerReceiver.EXTRA_START, !autoStarted),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        }
         val b = NotificationCompat.Builder(ctx, if (s.sound) CH_ALERTS else CH_ALERTS_QUIET)
             .setSmallIcon(R.drawable.ic_stat_lock)
             .setColor(phaseColor(to))
@@ -183,8 +200,24 @@ object Notifications {
             .setContentIntent(openApp(ctx))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setTimeoutAfter(if (autoStarted) 60_000L else 10 * 60_000L)
-        if (actionLabel != null) b.addAction(R.drawable.ic_play, actionLabel, action(ctx, TimerReceiver.ACTION_START, 20))
+        if (actionLabel != null) b.addAction(R.drawable.ic_play, actionLabel, longerIntent ?: action(ctx, TimerReceiver.ACTION_START, 20))
+        // "What did you finish?" - type the note right in the notification.
+        if (noteKey != null) {
+            val reply = PendingIntent.getBroadcast(
+                ctx, 22, Intent(ctx, TimerReceiver::class.java).setAction(TimerReceiver.ACTION_NOTE).putExtra(TimerReceiver.EXTRA_KEY, noteKey),
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val input = RemoteInput.Builder(KEY_NOTE).setLabel("What did you finish?").build()
+            b.addAction(NotificationCompat.Action.Builder(R.drawable.ic_edit, "Add note", reply).addRemoteInput(input).setAllowGeneratedReplies(false).build())
+            b.setTimeoutAfter(10 * 60_000L)
+        }
         post(ctx, ID_ALERT, b.build())
+    }
+
+    /** After an inline note: replace the notification so the reply spinner goes away. */
+    fun noteSaved(ctx: Context) {
+        NotificationManagerCompat.from(ctx).cancel(ID_ALERT)
+        FloatingTimer.message("✎ Note saved")
     }
 
     fun tip(ctx: Context, tip: Tip) {

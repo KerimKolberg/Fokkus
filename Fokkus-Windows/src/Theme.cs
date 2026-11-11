@@ -203,5 +203,7 @@ namespace Fokkus
         public const string Edit = "";
         public const string Down = "";
         public const string Up = "";
+        public const string Music = "";
+        public const string Note = "";
     }
 }

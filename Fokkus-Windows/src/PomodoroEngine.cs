@@ -140,6 +140,19 @@ namespace Fokkus
             Raise();
         }
 
+        // Changes the length of the current phase (e.g. a longer break); time already spent counts.
+        public void SetPhaseLength(TimeSpan length)
+        {
+            if (State == RunState.Idle) return;
+            TimeSpan spent = total - Remaining;
+            TimeSpan left = length - spent;
+            if (left < TimeSpan.Zero) left = TimeSpan.Zero;
+            total = length;
+            if (State == RunState.Running) endUtc = DateTime.UtcNow + left;
+            else remaining = left;
+            Raise();
+        }
+
         // Used by the --screenshots self-test only.
         internal void DebugSetRemaining(TimeSpan r)
         {

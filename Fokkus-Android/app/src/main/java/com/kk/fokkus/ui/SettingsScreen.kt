@@ -107,6 +107,14 @@ fun SettingsScreen(resumeTick: Int) {
                     description = "No pause, skip or stop during focus, and lists can only get stricter until the session ends.",
                     enabled = !strict,
                 )
+                SwitchRow(
+                    "Suggest longer breaks", s.smartBreaks, { v -> upd { it.copy(smartBreaks = v) } },
+                    description = "After a long block (50+ min) or when you skipped breaks, the break offers a longer one.",
+                )
+                SwitchRow(
+                    "Ask what you finished", s.askForNotes, { v -> upd { it.copy(askForNotes = v) } },
+                    description = "After each pomodoro: one line about what you got done (right in the notification).",
+                )
             }
         }
 
@@ -181,6 +189,9 @@ fun SettingsScreen(resumeTick: Int) {
             SwitchRow("Sound when a phase ends", s.sound, { v -> upd { it.copy(sound = v) } }, description = "Vibration stays on either way.")
         }
 
+        SyncSection(s)
+        BackupSection(s, strict)
+
         SectionTitle("Permissions")
         Card {
             Column {
@@ -194,7 +205,8 @@ fun SettingsScreen(resumeTick: Int) {
             }
         }
         Text(
-            "Fokkus works fully on your phone. Nothing you do is recorded or sent anywhere.",
+            "Fokkus works fully on your phone. Your data only leaves it if you set up sync (to your own cloud file); " +
+                "focus music streams from the internet while it plays.",
             color = Palette.Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 20.dp),
         )
     }

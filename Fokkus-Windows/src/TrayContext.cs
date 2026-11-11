@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
@@ -25,7 +26,16 @@ namespace Fokkus
         public readonly ProxyServer Proxy;
         public readonly AppBlocker AppBlocker;
         public readonly AppGuard AppGuard;
+        public readonly DistractionLog Distractions;
+        public readonly MusicPlayer Music;
+        public readonly SyncService Sync;
         public readonly Dictionary<string, BlockEntry> BlockLog = new Dictionary<string, BlockEntry>();
+        Hotkeys hotkeys;
+        bool hotkeysOn;
+        NotePrompt notePrompt;
+        FocusRecord lastRecord;
+        int skippedBreaks;
+        DateTime nextSync, nextReviewCheck;
 
         readonly Control invoker;
         readonly NotifyIcon tray;
@@ -70,6 +80,12 @@ namespace Fokkus
             AppBlocker.AppClosed += OnAppClosed;
             AppGuard = new AppGuard();
             AppGuard.AppMinimized += OnAppMinimized;
+            Distractions = DistractionLog.Load();
+            Distractions.ReadOnly = Headless;
+            Music = new MusicPlayer();
+            Sync = new SyncService(this);
+            nextSync = DateTime.Now.AddSeconds(8);
+            nextReviewCheck = DateTime.Now.AddSeconds(20);
 
             toast = new TipToast();
             mini = new MiniTimerForm(this);
@@ -93,6 +109,15 @@ namespace Fokkus
             SystemEvents.PowerModeChanged += OnPowerEvent;
             SystemEvents.SessionSwitch += OnSessionSwitch;
             ApplyAutostart();
+
+            // Ctrl+Alt+F / S / T / O from any app.
+            hotkeys = new Hotkeys();
+            hotkeys.Add(Keys.F, "Start / pause", ToggleTimer);
+            hotkeys.Add(Keys.S, "Skip", Skip);
+            hotkeys.Add(Keys.T, "Mini timer", ToggleMini);
+            hotkeys.Add(Keys.O, "Open Fokkus", ShowMain);
+            hotkeysOn = Settings.HotkeysEnabled;
+            hotkeys.Apply(hotkeysOn);
 
             var t = new Thread(() =>
             {
@@ -125,13 +150,161 @@ namespace Fokkus
         public void Skip()
         {
             if (StrictLocked) { StrictNotice(); return; }
+            // Skipping breaks again and again earns a nudge (and a longer break) next time.
+            if (Engine.State != RunState.Idle && Engine.Phase != Phase.Focus) skippedBreaks++;
             Engine.Skip();
         }
 
         public void Stop()
         {
             if (StrictLocked) { StrictNotice(); return; }
+            skippedBreaks = 0;
             Engine.Stop();
+        }
+
+        public void ToggleMini()
+        {
+            if (mini.Visible) { Settings.MiniTimerMode = 2; Settings.Save(); UpdateMiniVisibility(); }
+            else SwitchToMini();
+        }
+
+        public void OnUi(Action a)
+        {
+            try { invoker.BeginInvoke(a); } catch (Exception ex) { Log.Error(ex); }
+        }
+
+        // Statistics or the plan changed from outside (sync, restore): redraw everything.
+        public void DataChanged()
+        {
+            Engine.SettingsChanged();
+            mini.RefreshView();
+            if (main != null && !main.IsDisposed) main.RefreshAll();
+        }
+
+        public string HotkeyProblems { get { return hotkeys == null ? null : hotkeys.Problems(hotkeysOn); } }
+
+        // ------------------------------------------------------------ focus music
+
+        public void SetMusic(bool on)
+        {
+            Settings.MusicOn = on;
+            SettingsChanged();
+            if (on && Engine.State != RunState.Running) mini.Flash("♪ plays when you focus");
+        }
+
+        void UpdateMusic()
+        {
+            if (Headless) return;
+            bool play = Settings.MusicOn && Engine.State == RunState.Running && Engine.Phase == Phase.Focus;
+            if (play) Music.Play(Stations.Find(Settings, Settings.MusicStation), Settings.MusicVolume);
+            else Music.Stop();
+        }
+
+        public void FillMusicMenu(ToolStripItemCollection items)
+        {
+            items.Clear();
+            var onItem = new ToolStripMenuItem("Focus music", null, (s, e) => SetMusic(!Settings.MusicOn));
+            onItem.Checked = Settings.MusicOn;
+            items.Add(onItem);
+            items.Add(new ToolStripSeparator());
+            foreach (var st in Stations.All(Settings))
+            {
+                var station = st;
+                var it = new ToolStripMenuItem(st.Name + "   ·   " + st.Credit, null, (s, e) =>
+                {
+                    Settings.MusicStation = station.Id;
+                    Settings.MusicOn = true;
+                    SettingsChanged();
+                });
+                it.Checked = Settings.MusicStation == st.Id;
+                items.Add(it);
+            }
+            items.Add(new ToolStripSeparator());
+            var vol = new ToolStripMenuItem("Volume");
+            foreach (int v in new[] { 10, 20, 30, 40, 60, 80, 100 })
+            {
+                int value = v;
+                var vi = new ToolStripMenuItem(v + " %", null, (s, e) => { Settings.MusicVolume = value; Music.SetVolume(value); Settings.Save(); });
+                vi.Checked = Settings.MusicVolume == v;
+                vol.DropDownItems.Add(vi);
+            }
+            DarkSubmenu(vol);
+            items.Add(vol);
+            items.Add(new ToolStripMenuItem("Add a stream URL…", null, (s, e) =>
+            {
+                string url = Dialogs.AskText(DialogOwner, "Add a stream", "Link to an internet radio stream (http/https, e.g. ending in .mp3):", "");
+                if (url == null) return;
+                url = url.Trim();
+                if (!Stations.IsStreamUrl(url))
+                {
+                    Notify("⚠", "That isn't a stream link", "Use a direct http(s) link to an audio stream. YouTube links can't be played here.", Theme.Warn, 8, null, null);
+                    return;
+                }
+                if (!Settings.CustomStations.Any(c => c.Url == url)) Settings.CustomStations.Add(new CustomStation { Name = Stations.HostOf(url), Url = url });
+                Settings.MusicStation = "custom:" + url;
+                Settings.MusicOn = true;
+                SettingsChanged();
+            }));
+            var cur = Stations.Find(Settings, Settings.MusicStation);
+            if (cur.Id.StartsWith("custom:"))
+                items.Add(new ToolStripMenuItem("Remove “" + cur.Name + "”", null, (s, e) =>
+                {
+                    Settings.CustomStations.RemoveAll(c => "custom:" + c.Url == cur.Id);
+                    Settings.MusicStation = "lofi";
+                    SettingsChanged();
+                }));
+            if (Music.Error != null && Settings.MusicOn) items.Add(new ToolStripMenuItem(Music.Error) { Enabled = false });
+            items.Add(new ToolStripMenuItem("Streams by SomaFM — free, listener-supported radio") { Enabled = false });
+        }
+
+        // ------------------------------------------------------------ weekly review
+
+        public void ShowReview(DateTime anyDay)
+        {
+            var f = new ReviewForm(this, anyDay);
+            f.Show();
+            f.Activate();
+        }
+
+        void CheckWeeklyReview()
+        {
+            DateTime due = Review.DueWeek(DateTime.Now);
+            string key = due.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (string.CompareOrdinal(Settings.LastReviewedWeek ?? "", key) >= 0) return;
+            if (Engine.IsLockedIn) return;   // wait until you're not focusing
+            Settings.LastReviewedWeek = key;
+            Settings.Save();
+            var r = Analytics.Compute(Settings, Sessions, StatRange.Week, due);
+            if (r.TotalMinutes < 1) return;   // nothing to look back on
+            Notify("\U0001F4CA", "Your week in review", Theme.Compact(r.TotalMinutes) + " focused, " + r.Pomodoros + " pomodoros" +
+                   (r.Planned > 0 ? " of " + r.Planned + " planned" : "") + ". See what went well and what to plan next.",
+                Theme.Focus, 30, "Open review", () => ShowReview(due));
+        }
+
+        // ------------------------------------------------------------ notes
+
+        void AskForNote(FocusRecord record)
+        {
+            if (Headless || record == null) return;
+            if (notePrompt == null) notePrompt = new NotePrompt();
+            var subj = Planner.Find(Settings, record.SubjectId);
+            string sub = (subj != null ? subj.Name + " · " : "") + Math.Round(record.Seconds / 60.0) + " min · " + SessionStore.StartOf(record).ToString("HH:mm");
+            Rectangle avoid = toast.Visible ? toast.Bounds : (mini.Visible ? mini.Bounds : Rectangle.Empty);
+            notePrompt.Ask(sub, avoid, text =>
+            {
+                Sessions.SetNote(record, text);
+                mini.Flash("✎ note saved");
+                if (main != null && !main.IsDisposed) main.RefreshPage<StatsPage>();
+                ScheduleSync(5);
+            });
+        }
+
+        // ------------------------------------------------------------ sync
+
+        void ScheduleSync(int seconds)
+        {
+            DateTime at = DateTime.Now.AddSeconds(seconds);
+            if (at < nextSync) nextSync = at;
         }
 
         void StrictNotice()
@@ -305,6 +478,11 @@ namespace Fokkus
             Engine.SettingsChanged();
             mini.ApplyOpacity();
             ApplyAutostart();
+            if (hotkeys != null && hotkeysOn != Settings.HotkeysEnabled)
+            {
+                hotkeysOn = Settings.HotkeysEnabled;
+                hotkeys.Apply(hotkeysOn);
+            }
             if (main != null && !main.IsDisposed) main.RefreshAll();
         }
 
@@ -357,6 +535,10 @@ namespace Fokkus
             if (!Headless) try { SystemProxy.Disengage(); } catch (Exception ex) { Log.Error(ex); }
             AppBlocker.Update(false, new string[0]);
             AppGuard.Update(false, new string[0]);
+            Music.Dispose();
+            if (hotkeys != null) hotkeys.Dispose();
+            Distractions.SaveIfDirty();
+            if (notePrompt != null) notePrompt.Dispose();
             Proxy.Stop();
             SystemEvents.SessionEnding -= OnSessionEnding;
             SystemEvents.DisplaySettingsChanged -= OnDisplayEvent;
@@ -404,6 +586,7 @@ namespace Fokkus
         void OnStateChanged()
         {
             UpdateBlocking();
+            UpdateMusic();
             UpdateMiniVisibility();
             UpdateTray();
             mini.RefreshView();
@@ -420,13 +603,15 @@ namespace Fokkus
         void OnFocusEnded(object sender, FocusEndedArgs e)
         {
             planNote = null;
-            Sessions.Add(new FocusRecord
+            lastRecord = new FocusRecord
             {
                 StartMs = SessionStore.ToUnixMs(e.Start),
                 Seconds = e.Seconds,
                 SubjectId = Planner.Active(Settings) != null ? Settings.ActiveSubjectId : null,
                 Pomodoros = e.Completed ? 1 : 0,
-            });
+            };
+            Sessions.Add(lastRecord);
+            ScheduleSync(5);
             if (!e.Completed) return;
             var cur = Planner.Active(Settings);
             if (cur == null) return;
@@ -470,6 +655,7 @@ namespace Fokkus
         {
             if (e.To == Phase.Focus) focusSecondsSinceTip = 0;
             if (!e.Natural) return;
+            if (e.From != Phase.Focus) skippedBreaks = 0;   // a break taken in full
             if (Settings.SoundEnabled) Chime.Play();
 
             int minutes = (int)Engine.DurationOf(e.To).TotalMinutes;
@@ -493,7 +679,23 @@ namespace Fokkus
                     body += "\n" + Tips.Icon(tip.Category) + " " + tip.Title + ": " + tip.Text;
                 }
                 if (planNote != null) body = planNote + "\n" + body;
-                Notify(icon, head, body, c, e.AutoStarted ? 20 : 30, e.AutoStarted ? null : "Start break", e.AutoStarted ? (Action)null : () => Engine.Start());
+                string actionText = e.AutoStarted ? null : "Start break";
+                Action action = e.AutoStarted ? (Action)null : () => Engine.Start();
+                // Smarter breaks: a longer one after a long block or after skipping breaks.
+                int longer = Settings.SmartBreaks && e.From == Phase.Focus ? Breaks.Suggest(e.FocusMinutes, minutes, skippedBreaks) : 0;
+                if (longer > 0)
+                {
+                    bool auto = e.AutoStarted;
+                    body = Breaks.Reason(e.FocusMinutes, skippedBreaks) + " Give your brain " + longer + " minutes.\n" + body;
+                    actionText = auto ? "Make it " + longer + " min" : "Start " + longer + "-min break";
+                    action = () =>
+                    {
+                        Engine.SetPhaseLength(TimeSpan.FromMinutes(longer));
+                        if (!auto) Engine.Start();
+                    };
+                }
+                Notify(icon, head, body, c, e.AutoStarted ? 20 : 30, actionText, action);
+                if (e.From == Phase.Focus && Settings.AskForNotes && lastRecord != null && lastRecord.Pomodoros > 0) AskForNote(lastRecord);
             }
         }
 
@@ -517,6 +719,25 @@ namespace Fokkus
                 }
             }
             if (Engine.IsLockedIn) Proxy.StatusText = Theme.FormatTime(Engine.Remaining) + " of focus left — you've got this.";
+            if (Headless) return;
+
+            if (guardTick % 3 == 0)
+            {
+                bool hadError = Music.Error != null;
+                Music.Check();
+                if (hadError != (Music.Error != null) && main != null && !main.IsDisposed) main.RefreshPage<TimerPage>();
+            }
+            if (guardTick % 30 == 0) Distractions.SaveIfDirty();
+            if (!string.IsNullOrEmpty(Settings.SyncFolder) && DateTime.Now >= nextSync)
+            {
+                nextSync = DateTime.Now.AddMinutes(10);
+                Sync.Run();
+            }
+            if (DateTime.Now >= nextReviewCheck)
+            {
+                nextReviewCheck = DateTime.Now.AddMinutes(1);
+                CheckWeeklyReview();
+            }
         }
 
         // ------------------------------------------------------------ blocking
@@ -561,6 +782,7 @@ namespace Fokkus
             var rules = Proxy.Rules;
             bool distraction = (rules.BlockOn && rules.MatchesBlocked(host)) || Presets.IsKnownDistraction(host);
             if (!distraction) return;
+            Distractions.Add("site", domain, DateTime.Now);
             mini.Flash("✕ " + domain);
             if (CanNotice("site:" + domain, 90))
                 Notify("\U0001F6AB", domain + " is blocked", "Stay locked in — " + Theme.FormatTime(Engine.Remaining) + " left in this focus session.", Theme.Focus, 6, null, null);
@@ -568,6 +790,7 @@ namespace Fokkus
 
         void OnAppClosed(string name)
         {
+            Distractions.Add("app", name, DateTime.Now);
             mini.Flash("✕ " + name + " closed");
             if (CanNotice("app:" + name.ToLowerInvariant(), 120))
                 Notify("\U0001F6AB", name + " was closed", "It's on your blocked apps list. You can open it again during the break.", Theme.Focus, 6, null, null);
@@ -575,6 +798,7 @@ namespace Fokkus
 
         void OnAppMinimized(string name)
         {
+            Distractions.Add("app", name, DateTime.Now);
             mini.Flash("– " + name + " minimized");
             if (CanNotice("min:" + name.ToLowerInvariant(), 120))
                 Notify("\U0001F4A4", name + " was minimized", "It isn't on your allowed apps list, so it waits until the break. Nothing was closed.",
@@ -680,7 +904,7 @@ namespace Fokkus
             shot("win-plan-empty.png");
             SeedDemoData();
             form.RefreshAll();
-            string[] names = { "timer", "plan", "stats", "websites", "apps", "tips", "settings" };
+            string[] names = { "timer", "plan", "stats", "websites", "apps", "tips", "data", "settings" };
             for (int i = 0; i < names.Length; i++)
             {
                 form.Navigate(i);
@@ -694,6 +918,15 @@ namespace Fokkus
             stats.ShowRange(StatRange.Week);
             stats.DebugHover(2);
             shot("win-stats-hover.png");
+            stats.ShowLower(1); shot("win-stats-notes.png");
+            stats.ShowLower(2); shot("win-stats-distractions.png");
+            stats.ShowLower(0);
+            using (var review = new ReviewForm(this, DateTime.Today.AddDays(-7))) SaveOffscreen(review, dir, "win-review.png");
+            using (var np = new NotePrompt())
+            {
+                np.Fill("Physics · 25 min · 14:05");
+                SaveOffscreen(np, dir, "win-note-prompt.png");
+            }
             SaveMini(dir, "win-mini-idle.png");
 
             Engine.Start();
@@ -762,6 +995,36 @@ namespace Fokkus
                 }
                 if (back % 6 == 2) Sessions.Add(new FocusRecord { StartMs = SessionStore.ToUnixMs(start), Seconds = 14 * 60, Pomodoros = 0 });
             }
+            // Notes, distractions, music and a sync folder for the new screens.
+            string[] notes = { "Exercise sheet 3, tasks 1–2", "Lecture 7 summary", "Recursion exercises", "Kinematics problems", "Eigenvalues: 4 examples", "Mock exam, part A" };
+            var week = Analytics.WeekStart(DateTime.Today);
+            int ni = 0;
+            foreach (var r in Sessions.Records.Where(x => x.Pomodoros > 0 && SessionStore.StartOf(x) >= week.AddDays(-7)).Take(9))
+            {
+                r.Note = notes[ni++ % notes.Length];
+                r.NoteMs = 1;
+            }
+            string[] tried = { "youtube.com", "instagram.com", "youtube.com", "reddit.com", "youtube.com", "Discord", "netflix.com", "youtube.com" };
+            for (int i = 0; i < 16; i++)
+                Distractions.Add(tried[i % tried.Length] == "Discord" ? "app" : "site", tried[i % tried.Length], week.AddDays(-7).AddHours(9 + i * 9).AddMinutes(i));
+            for (int i = 0; i < 9; i++)
+                Distractions.Add(tried[i % tried.Length] == "Discord" ? "app" : "site", tried[i % tried.Length], week.AddHours(13 + i * 5).AddMinutes(i));
+            Settings.MusicOn = true;
+            Settings.SyncFolder = @"G:\My Drive";
+        }
+
+        // Forms with child controls only paint once shown: show them far off-screen, capture, hide.
+        static void SaveOffscreen(Form f, string dir, string name)
+        {
+            f.StartPosition = FormStartPosition.Manual;
+            f.ShowInTaskbar = false;
+            f.Location = new Point(-32000, -32000);
+            f.Show();
+            Application.DoEvents();
+            f.Location = new Point(-32000, -32000);
+            Application.DoEvents();
+            SaveForm(f, dir, name);
+            f.Hide();
         }
 
         void SaveMini(string dir, string name)
@@ -809,7 +1072,12 @@ namespace Fokkus
             profileItem.DropDownOpening += (s, e) => FillProfileMenu(profileItem.DropDownItems);
             m.Items.AddRange(new ToolStripItem[] { status, new ToolStripSeparator(), toggle, skip, stop, new ToolStripSeparator(), profileItem, during });
             m.Items.AddRange(filterItems);
-            m.Items.AddRange(new ToolStripItem[] { new ToolStripSeparator(), miniItem, tip, open, new ToolStripSeparator(), quit });
+            var musicItem = new ToolStripMenuItem("Focus music");
+            musicItem.DropDownItems.Add("…");
+            DarkSubmenu(musicItem);
+            musicItem.DropDownOpening += (s, e) => FillMusicMenu(musicItem.DropDownItems);
+            var reviewItem = new ToolStripMenuItem("Weekly review", null, (s, e) => ShowReview(DateTime.Today));
+            m.Items.AddRange(new ToolStripItem[] { new ToolStripSeparator(), musicItem, reviewItem, miniItem, tip, open, new ToolStripSeparator(), quit });
             m.Opening += (s, e) =>
             {
                 var st = Engine.State;
@@ -821,6 +1089,7 @@ namespace Fokkus
                 miniItem.Checked = mini.Visible;
                 for (int i = 0; i < filters.Length; i++) filterItems[i].Checked = Settings.IsOn(filters[i]);
                 profileItem.Text = "Profile: " + ProfileLabel;
+                musicItem.Text = "Focus music: " + (Settings.MusicOn ? Stations.Find(Settings, Settings.MusicStation).Name : "off");
                 quit.Enabled = !StrictLocked;
                 quit.Text = StrictLocked ? "Quit (locked until focus ends)" : "Quit";
             };

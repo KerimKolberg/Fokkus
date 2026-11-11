@@ -66,6 +66,7 @@ fun StatsScreen() {
     var range by rememberSaveable { mutableStateOf(StatRange.WEEK) }
     var anchor by remember { mutableStateOf(LocalDate.now()) }
     var selected by remember { mutableIntStateOf(-1) }
+    var reviewOpen by remember { mutableStateOf(false) }
     val r = remember(s, records, range, anchor) { Analytics.compute(s, records, range, anchor) }
     val today = LocalDate.now()
 
@@ -98,6 +99,11 @@ fun StatsScreen() {
             Tile(r.dailyAverageLabel, Analytics.compact(r.dailyAverage), "per day", Modifier.weight(1f))
             Tile("Streak", "${r.streak} ${if (r.streak == 1) "day" else "days"}", "in a row with a pomodoro", Modifier.weight(1f))
         }
+        if (range == StatRange.WEEK) Box(
+            Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(Palette.Surface2)
+                .clickable { reviewOpen = true }.padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) { Text("📊  Weekly review", color = Palette.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
 
         // Legend: always for 2+ series, plus the plan marker key.
         val present = r.series.filterIndexed { i, _ -> r.buckets.any { it.minutes[i] > 0.01 } }
@@ -149,8 +155,10 @@ fun StatsScreen() {
                 }
             }
         }
+        NotesAndDistractions(r.start, r.end, period)
         Spacer(Modifier.height(28.dp))
     }
+    if (reviewOpen) ReviewDialog(anchor) { reviewOpen = false }
 }
 
 @Composable

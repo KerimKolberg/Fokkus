@@ -44,10 +44,22 @@ object SubjectColors {
     fun nextIndex(subjects: List<Subject>): Int = series.indices.firstOrNull { i -> subjects.none { it.colorIndex == i } } ?: series.size
 }
 
-/** One focus phase: a completed pomodoro (pomodoros = 1) or the focused part of a skipped/stopped one. */
-data class FocusRecord(val startMs: Long, val seconds: Int, val subjectId: String?, val pomodoros: Int) {
+/**
+ * One focus phase: a completed pomodoro (pomodoros = 1) or the focused part of a skipped/stopped one.
+ * note = "what did you finish?"; noteMs = when it was written (the newest note wins when syncing).
+ */
+data class FocusRecord(
+    val startMs: Long,
+    val seconds: Int,
+    val subjectId: String?,
+    val pomodoros: Int,
+    val note: String? = null,
+    val noteMs: Long = 0L,
+) {
     val start: LocalDateTime get() = LocalDateTime.ofInstant(Instant.ofEpochMilli(startMs), ZoneId.systemDefault())
     val day: LocalDate get() = start.toLocalDate()
+    /** Identifies a record across devices (sync, restore). */
+    val key: String get() = "$startMs|$seconds"
 }
 
 object SessionLog {
@@ -61,25 +73,67 @@ object SessionLog {
         _records.value = if (file.exists()) load() else migrateOldStats(context)
     }
 
-    fun add(r: FocusRecord) {
-        _records.value = _records.value + r
-        val snapshot = _records.value
-        Thread { save(snapshot) }.start()
+    fun add(r: FocusRecord) = change { it + r }
+
+    /** Saves run one after another on a single background thread, so the newest list always ends up on disk. */
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun change(f: (List<FocusRecord>) -> List<FocusRecord>) {
+        val snapshot = synchronized(lock) {
+            val before = _records.value
+            val after = f(before)
+            if (after === before) return
+            _records.value = after
+            after
+        }
+        io.execute { save(snapshot) }
+    }
+
+    fun setNote(key: String, note: String?) = change { list ->
+        list.map { if (it.key == key) it.copy(note = note?.trim()?.ifEmpty { null }, noteMs = System.currentTimeMillis()) else it }
+    }
+
+    /** Adds the records we don't have yet and takes newer notes. Returns how many records were added or updated. */
+    fun merge(incoming: List<FocusRecord>): Int {
+        var changed = 0
+        change { current ->
+            val byKey = LinkedHashMap<String, FocusRecord>()
+            current.forEach { byKey[it.key] = it }
+            for (r in incoming) {
+                if (r.seconds <= 0) continue
+                val mine = byKey[r.key]
+                if (mine == null) { byKey[r.key] = r; changed++ }
+                else if (r.noteMs > mine.noteMs) { byKey[r.key] = mine.copy(note = r.note, noteMs = r.noteMs); changed++ }
+            }
+            if (changed > 0) byKey.values.sortedBy { it.startMs } else current
+        }
+        return changed
+    }
+
+    /** Subject ids changed (two plans joined by name on the first sync). */
+    fun remapSubjects(map: Map<String, String>) {
+        if (map.isEmpty()) return
+        change { list -> if (list.none { it.subjectId in map }) list else list.map { r -> r.subjectId?.let { map[it] }?.let { r.copy(subjectId = it) } ?: r } }
     }
 
     private fun load(): List<FocusRecord> = try {
         val arr = JSONArray(file.readText())
-        (0 until arr.length()).map {
-            val o = arr.getJSONObject(it)
-            FocusRecord(o.getLong("s"), o.getInt("sec"), if (o.isNull("sub")) null else o.optString("sub"), o.optInt("p", 0))
-        }
+        (0 until arr.length()).map { fromJson(arr.getJSONObject(it)) }
     } catch (e: Exception) {
         emptyList()
     }
 
+    fun toJson(r: FocusRecord): JSONObject = JSONObject().put("s", r.startMs).put("sec", r.seconds).put("sub", r.subjectId ?: JSONObject.NULL)
+        .put("p", r.pomodoros).put("n", r.note ?: JSONObject.NULL).put("nt", r.noteMs)
+
+    fun fromJson(o: JSONObject) = FocusRecord(
+        o.getLong("s"), o.getInt("sec"), if (o.isNull("sub")) null else o.optString("sub").ifEmpty { null }, o.optInt("p", 0),
+        if (o.isNull("n")) null else o.optString("n").ifEmpty { null }, o.optLong("nt", 0L),
+    )
+
     private fun save(list: List<FocusRecord>) = synchronized(lock) {
         val arr = JSONArray()
-        list.forEach { r -> arr.put(JSONObject().put("s", r.startMs).put("sec", r.seconds).put("sub", r.subjectId ?: JSONObject.NULL).put("p", r.pomodoros)) }
+        list.forEach { arr.put(toJson(it)) }
         val tmp = File(file.parentFile, "sessions.json.tmp")
         tmp.writeText(arr.toString())
         tmp.renameTo(file)

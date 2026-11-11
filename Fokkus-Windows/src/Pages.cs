@@ -167,7 +167,7 @@ namespace Fokkus
     class SettingsPage : Page
     {
         readonly Stepper focus, shortBreak, longBreak, sessions, opacity;
-        readonly Toggle autoBreaks, autoFocus, strict, sound, autostart, closeToTray, minimizeToTray;
+        readonly Toggle autoBreaks, autoFocus, strict, sound, autostart, closeToTray, minimizeToTray, smartBreaks, askNotes, hotkeys;
         readonly Segmented miniMode;
         readonly FlatButton[] rhythms = new FlatButton[Rhythm.All.Length];
         readonly Label rhythmHint;
@@ -197,6 +197,8 @@ namespace Fokkus
             autoBreaks = AddToggle("Start breaks automatically", null, lx, S(398), lw, (s, e) => { Ctx.Settings.AutoStartBreaks = autoBreaks.Checked; Save(); });
             autoFocus = AddToggle("Start focus automatically after breaks", null, lx, S(436), lw, (s, e) => { Ctx.Settings.AutoStartFocus = autoFocus.Checked; Save(); });
             strict = AddToggle("Strict mode", "No pause, skip, stop or quitting during focus, and the block lists can't be loosened.", lx, S(474), lw, (s, e) => { Ctx.Settings.StrictMode = strict.Checked; Save(); });
+            smartBreaks = AddToggle("Suggest longer breaks", "After a long block (50+ min) or when you skipped breaks, the break pop-up offers a longer one.", lx, S(546), lw,
+                (s, e) => { Ctx.Settings.SmartBreaks = smartBreaks.Checked; Save(); });
 
             Section("Mini timer", rx, S(98), rw);
             miniMode = Place(new Segmented("Always", "In sessions", "Off"), rx, S(124), rw, S(36));
@@ -211,15 +213,12 @@ namespace Fokkus
             minimizeToTray = AddToggle("Minimizing hides it in the tray", "Off: minimize to the taskbar like any other window.", rx, S(364), rw,
                 (s, e) => { Ctx.Settings.MinimizeToTray = minimizeToTray.Checked; Save(); });
 
-            Section("Safety", rx, S(430), rw);
-            Button("Restore internet settings", Glyph.Refresh, rx, S(456), S(250), S(38), (s, e) => Ctx.RestoreInternet());
-            AddLabel("If websites ever stay blocked after Fokkus closed unexpectedly, click this (or run the app once — it repairs itself on start).",
-                Theme.F(8.5f), Theme.Muted, rx, S(500), rw, S(52));
-            Button("Open data folder", Glyph.Folder, rx, S(560), S(250), S(38), (s, e) =>
-            {
-                try { Process.Start("explorer.exe", "\"" + AppSettings.Dir + "\""); } catch { }
-            });
+            Section("Notes & shortcuts", rx, S(430), rw);
+            askNotes = AddToggle("Ask what you finished after each pomodoro", null, rx, S(456), rw, (s, e) => { Ctx.Settings.AskForNotes = askNotes.Checked; Save(); });
+            hotkeys = AddToggle("Global shortcuts", HotkeyText, rx, S(494), rw, (s, e) => { Ctx.Settings.HotkeysEnabled = hotkeys.Checked; Save(); });
         }
+
+        const string HotkeyText = "Ctrl+Alt+F start/pause · Ctrl+Alt+S skip · Ctrl+Alt+T mini timer · Ctrl+Alt+O open Fokkus — from any app.";
 
         void ApplyRhythm(Rhythm r)
         {
@@ -267,6 +266,12 @@ namespace Fokkus
             autostart.SetSilently(s.StartWithWindows);
             closeToTray.SetSilently(s.CloseToTray);
             minimizeToTray.SetSilently(s.MinimizeToTray);
+            smartBreaks.SetSilently(s.SmartBreaks);
+            askNotes.SetSilently(s.AskForNotes);
+            hotkeys.SetSilently(s.HotkeysEnabled);
+            string problem = Ctx.HotkeyProblems;
+            hotkeys.Description = problem != null ? "⚠ " + problem : HotkeyText;
+            hotkeys.Invalidate();
         }
     }
 }

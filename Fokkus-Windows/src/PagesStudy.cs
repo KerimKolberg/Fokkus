@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -43,7 +44,8 @@ namespace Fokkus
         readonly TodayPlanView plan;
         readonly Filter[] quickFilters = { Filter.AllowSites, Filter.BlockSites, Filter.AllowApps, Filter.BlockApps };
         readonly QuickToggle[] quick = new QuickToggle[4];
-        readonly FlatButton btnProfile;
+        readonly FlatButton btnProfile, btnMusic;
+        readonly QuickToggle music;
         string lastKey;
 
         static string QuickName(Filter f)
@@ -93,10 +95,19 @@ namespace Fokkus
             Section("Studying", rx, S(246), rw);
             subject = Place(new SubjectButton(), rx, S(270), rw, S(40));
             subject.Click += (s, e) => ShowSubjectMenu();
-            planTitle = Section("Today's plan", rx, S(324), rw);
-            plan = Place(new TodayPlanView(), rx, S(348), rw, S(204));
+            planTitle = Section("Today's plan", rx, S(324), rw - S(70));
+            var edit = Button("Edit", Glyph.Edit, rx + rw - S(66), S(318), S(66), S(28), (s, e) => Ctx.OpenPage(1));
+            edit.Font = Theme.F(9);
+            plan = Place(new TodayPlanView(), rx, S(350), rw, S(194));
             plan.SubjectClicked += subj => Ctx.SelectSubject(subj.Id);
-            Button("Edit plan", Glyph.Calendar, rx, S(560), rw, S(36), (s, e) => Ctx.OpenPage(1));
+
+            // Focus music: on/off + station menu. It only plays while a focus phase runs.
+            music = Place(new QuickToggle("Music", Glyph.Music), rx, S(552), rw - S(46), S(40));
+            music.Click += (s, e) => Ctx.SetMusic(!Ctx.Settings.MusicOn);
+            btnMusic = Button("", Glyph.Down, rx + rw - S(40), S(552), S(40), S(40), (s, e) => ShowMusicMenu());
+            var tip = new ToolTip();
+            tip.SetToolTip(music, "Focus music plays while you focus and pauses on breaks");
+            tip.SetToolTip(btnMusic, "Station and volume");
         }
 
         void ShowProfileMenu()
@@ -109,6 +120,18 @@ namespace Fokkus
             Ctx.FillProfileMenu(m.Items);
             m.Closed += (a, b) => BeginInvoke(new Action(m.Dispose));
             m.Show(btnProfile, new Point(0, btnProfile.Height + S(2)));
+        }
+
+        void ShowMusicMenu()
+        {
+            var m = new ContextMenuStrip();
+            m.Renderer = new DarkMenuRenderer();
+            m.Font = Theme.F(10);
+            m.ShowCheckMargin = true;
+            m.ShowImageMargin = false;
+            Ctx.FillMusicMenu(m.Items);
+            m.Closed += (a, b) => BeginInvoke(new Action(m.Dispose));
+            m.Show(btnMusic, new Point(btnMusic.Width - S(300), btnMusic.Height + S(2)));
         }
 
         void ShowSubjectMenu()
@@ -199,6 +222,10 @@ namespace Fokkus
             subject.Invalidate();
             for (int i = 0; i < quick.Length; i++) quick[i].SetChecked(s.IsOn(quickFilters[i]));
             btnProfile.Text = "Profile: " + Ctx.ProfileLabel;
+            var station = Stations.Find(s, s.MusicStation);
+            music.Text = Ctx.Music.Error != null && s.MusicOn ? "Can't play" : station.Name;
+            music.SetChecked(s.MusicOn);
+            music.Invalidate();
             plan.SetRows(Planner.Today(s, Ctx.Sessions), s.ActiveSubjectId);
             lastKey = null;
             OnTick();
@@ -385,6 +412,9 @@ namespace Fokkus
         readonly LegendView legend;
         readonly BarChart chart;
         readonly SubjectBreakdown breakdown;
+        readonly Segmented lower;
+        readonly Label lowerHint;
+        readonly DarkList list;
 
         public StatsPage(TrayContext ctx, Size size) : base(ctx, size)
         {
@@ -402,8 +432,38 @@ namespace Fokkus
             for (int i = 0; i < 4; i++) tiles[i] = Place(new StatTile(), Pad + i * (tw + S(12)), S(142), tw, S(76));
             legend = Place(new LegendView(), Pad, S(228), full, S(22));
             chart = Place(new BarChart(), Pad, S(252), full, S(228));
-            Section("By subject", Pad, S(490), full);
-            breakdown = Place(new SubjectBreakdown(), Pad, S(514), full, S(136));
+
+            // Below the chart: time per subject, your notes, or the distractions you tried to open.
+            lower = Place(new Segmented("By subject", "Notes", "Distractions"), Pad, S(488), S(380), S(30));
+            lower.SelectionChanged += (s, e) => RefreshView();
+            lowerHint = AddLabel("", Theme.F(8.5f), Theme.Muted, Pad + S(392), S(488), full - S(392) - S(162), S(30), ContentAlignment.MiddleRight);
+            var review = Button("Weekly review", Glyph.Note, Width - Pad - S(150), S(488), S(150), S(30), (s, e) => Ctx.ShowReview(anchor));
+            review.Font = Theme.F(9);
+            breakdown = Place(new SubjectBreakdown(), Pad, S(526), full, S(124));
+            list = Place(new DarkList(), Pad, S(526), full, S(124));
+            list.ItemHeight = S(26);
+            list.Font = Theme.F(9.5f);
+            list.DoubleClick += (s, e) => EditNote();
+            list.Visible = false;
+            new ToolTip().SetToolTip(list, "Double-click a note to edit it");
+        }
+
+        // A note in the list (double-click to edit).
+        class NoteItem
+        {
+            public FocusRecord Record;
+            public string Text;
+            public override string ToString() { return Text; }
+        }
+
+        void EditNote()
+        {
+            var item = list.SelectedItem as NoteItem;
+            if (item == null) return;
+            string t = Dialogs.AskText(FindForm(), "Note", "What did you finish?", item.Record.Note);
+            if (t == null) return;
+            Ctx.Sessions.SetNote(item.Record, t);
+            RefreshView();
         }
 
         internal void ShowRange(StatRange r)
@@ -419,6 +479,8 @@ namespace Fokkus
             chart.DebugHover(bucket);
         }
 
+        internal void ShowLower(int tab) { lower.SelectedIndex = tab; }
+
         public override void RefreshView()
         {
             var r = Analytics.Compute(Ctx.Settings, Ctx.Sessions, range, anchor);
@@ -433,6 +495,48 @@ namespace Fokkus
             legend.Set(present, r.Buckets.Any(b => b.Target > 0));
             chart.SetData(r);
             breakdown.SetData(r);
+
+            int tab = lower.SelectedIndex;
+            breakdown.Visible = tab == 0;
+            list.Visible = tab != 0;
+            if (tab == 1)
+            {
+                // Notes of the period, newest first. Long range: only the notes, short range: date + time + subject.
+                var notes = Ctx.Sessions.Records.Where(x => !string.IsNullOrEmpty(x.Note))
+                    .Where(x => { var t = SessionStore.StartOf(x); return t >= r.Start && t < r.End; })
+                    .OrderByDescending(x => x.StartMs).ToList();
+                list.EmptyText = "No notes " + PeriodWord() + ". They're added when a pomodoro ends.";
+                list.RightText = o =>
+                {
+                    var n = o as NoteItem;
+                    return n == null ? null : SessionStore.StartOf(n.Record).ToString(range == StatRange.Day ? "HH:mm" : "ddd d MMM · HH:mm", CultureInfo.GetCultureInfo("en-GB"));
+                };
+                list.SetItems(notes.Select(x =>
+                {
+                    var subj = Planner.Find(Ctx.Settings, x.SubjectId);
+                    return (object)new NoteItem { Record = x, Text = (subj != null ? subj.Name + "  —  " : "") + x.Note };
+                }));
+                lowerHint.Text = notes.Count > 0 ? notes.Count + (notes.Count == 1 ? " note" : " notes") : "";
+            }
+            else if (tab == 2)
+            {
+                var top = Insights.Top(Ctx.Distractions, r.Start, r.End, 20);
+                int count = Insights.Count(Ctx.Distractions, r.Start, r.End);
+                list.EmptyText = "Nothing blocked " + PeriodWord() + ".";
+                list.RightText = o =>
+                {
+                    var d = top.FirstOrDefault(x => x.Name + (x.Kind == "app" ? "  (app)" : "") == (string)o);
+                    return d == null ? null : Insights.Describe(d);
+                };
+                list.SetItems(top.Select(x => (object)(x.Name + (x.Kind == "app" ? "  (app)" : ""))));
+                lowerHint.Text = count > 0 ? count + (count == 1 ? " attempt" : " attempts") : "";
+            }
+            else lowerHint.Text = "";
+        }
+
+        string PeriodWord()
+        {
+            return range == StatRange.Day ? "on this day" : range == StatRange.Week ? "this week" : range == StatRange.Month ? "this month" : "this year";
         }
     }
 }

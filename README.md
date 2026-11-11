@@ -6,7 +6,7 @@ A Pomodoro study app for **Windows** and **Android**. Plan your week per subject
 Fokkus-Windows/   – C# source, build.cmd, installer/ (Inno Setup script)
 Fokkus-Android/   – Kotlin / Jetpack Compose project (open in Android Studio)
 dist/             – build output (not in git):
-  Fokkus-Setup-1.4.0.exe – Windows installer
+  Fokkus-Setup-1.5.0.exe – Windows installer
   Fokkus.exe             – Windows app, portable (no install)
   Fokkus.apk             – Android app (sideload)
 ```
@@ -62,7 +62,7 @@ Example: for a programming session where you only want to keep social media & co
 
 ## Windows
 
-**Install:** run `Fokkus-Setup-1.4.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
+**Install:** run `Fokkus-Setup-1.5.0.exe`. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Fokkus` and adds:
 - a desktop shortcut and a Start menu entry
 - an entry in *Settings → Apps*, from where you can uninstall. The uninstaller asks whether to keep your plan and statistics.
 

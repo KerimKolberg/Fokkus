@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.provider.Browser
 import android.view.accessibility.AccessibilityEvent
+import com.kk.fokkus.data.DistractionLog
 import com.kk.fokkus.data.Domains
 import com.kk.fokkus.data.SettingsStore
 import com.kk.fokkus.timer.TimerEngine
@@ -87,8 +88,13 @@ class BlockerService : AccessibilityService() {
         if (pkg == lastBlockedPkg && now - lastBlockAt < 1200) return
         lastBlockedPkg = pkg
         lastBlockAt = now
+        DistractionLog.add("app", appLabel(pkg))
         BlockActivity.show(this, pkg, null)
     }
+
+    private fun appLabel(pkg: String): String = try {
+        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+    } catch (e: Exception) { pkg }
 
     private fun checkBrowser(pkg: String, force: Boolean) {
         val s = SettingsStore.current
@@ -115,6 +121,7 @@ class BlockerService : AccessibilityService() {
 
     /** Opens an allowed page in the same browser tab slot, then shows the lock screen on top. */
     private fun leaveBlockedSite(pkg: String, host: String) {
+        DistractionLog.add("site", Domains.baseDomain(host))
         val safe = Domains.safeUrl(SettingsStore.current)
         if (safe != null) {
             try {
