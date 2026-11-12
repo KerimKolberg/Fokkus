@@ -25,8 +25,18 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.mutableStateOf
 import com.kk.fokkus.block.AppCatalog
 import com.kk.fokkus.block.Blocking
+import com.kk.fokkus.data.Analytics
+import com.kk.fokkus.data.Review
+import com.kk.fokkus.data.SessionLog
+import com.kk.fokkus.data.SettingsStore
+import com.kk.fokkus.data.StatRange
+import com.kk.fokkus.data.SyncManager
+import com.kk.fokkus.timer.TimerEngine
+import com.kk.fokkus.ui.ReviewDialog
+import java.time.LocalDate
 import com.kk.fokkus.ui.AppsScreen
 import com.kk.fokkus.ui.IconRes
 import com.kk.fokkus.ui.FokkusTheme
@@ -40,6 +50,7 @@ import com.kk.fokkus.ui.WebsitesScreen
 
 class MainActivity : ComponentActivity() {
     private val resumeTick = mutableIntStateOf(0)
+    private val reviewWeek = mutableStateOf<LocalDate?>(null)
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         resumeTick.intValue++
     }
@@ -55,7 +66,10 @@ class MainActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         setContent {
-            FokkusTheme { MainUi(resumeTick.intValue, requestNotifications) }
+            FokkusTheme {
+                MainUi(resumeTick.intValue, requestNotifications)
+                reviewWeek.value?.let { week -> ReviewDialog(week) { reviewWeek.value = null } }
+            }
         }
     }
 
@@ -63,6 +77,20 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         Blocking.invalidate()
         resumeTick.intValue++
+        SyncManager.run(minGapMs = 60_000L)
+        offerWeeklyReview()
+    }
+
+    /** Once a week (Sunday evening, or the next time you open Fokkus) the review of the week opens by itself. */
+    private fun offerWeeklyReview() {
+        if (reviewWeek.value != null || TimerEngine.current.lockedIn) return
+        val due = Review.dueWeek()
+        val key = due.toString()
+        val s = SettingsStore.current
+        if ((s.lastReviewedWeek ?: "") >= key) return
+        SettingsStore.update { it.copy(lastReviewedWeek = key) }
+        // Nothing to look back on: don't show an empty review.
+        if (Analytics.compute(s, SessionLog.records.value, StatRange.WEEK, due).totalMinutes >= 1) reviewWeek.value = due
     }
 }
 
